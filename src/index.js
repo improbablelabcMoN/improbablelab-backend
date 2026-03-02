@@ -4,20 +4,22 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+export const logger = {
+  info:  (msg) => console.log(`[INFO]  ${msg}`),
+  warn:  (msg) => console.warn(`[WARN]  ${msg}`),
+  error: (msg) => console.error(`[ERROR] ${msg}`),
+};
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(cors({
-  origin: '*',
-}));
+app.use(cors({ origin: '*' }));
 app.use(express.json());
 
-// Health check — risponde subito senza dipendenze
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Import routes dinamico per evitare crash all'avvio
 async function startServer() {
   try {
     const { default: lineupsRouter }   = await import('./routes/lineups.js');
@@ -30,15 +32,15 @@ async function startServer() {
     app.use('/api/stats',     statsRouter);
     app.use('/api/news',      newsRouter);
 
-    console.log('[OK] Routes loaded');
+    logger.info('Routes loaded OK');
   } catch (err) {
-    console.error('[ERROR] Failed to load routes:', err.message);
+    logger.error(`Failed to load routes: ${err.message}`);
   }
 
   app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 ImprobableLab backend running on port ${PORT}`);
+    logger.info(`🚀 Backend running on port ${PORT}`);
   });
 }
 
