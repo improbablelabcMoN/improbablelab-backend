@@ -33,51 +33,60 @@ async function scrapeMatchPage(matchUrl, league) {
     const homePlayers = [];
     const awayPlayers = [];
 
-    // BeSoccer usa .team-players o .lineup-list con .player-item
-    const panels = $('.lineup-panel, .team-lineup, .team-box, [class*="lineup"]');
+    // BeSoccer struttura reale:
+    // <li data-name="Mile Svilar">
+    //   <div class="player-img">
+    //     <span class="num local">99</span>
+    //   </div>
+    // </li>
+    // I giocatori di casa hanno span.num.local, quelli in trasferta span.num.visitor
+    // Le liste sono dentro .panel-lineup o .team-lineup separati per squadra
 
-    panels.each((panelIdx, panel) => {
-      const players = [];
-      $(panel).find('.player, .player-name, [class*="player"]').each((_, el) => {
-        const name = $(el).find('.name, span, strong').first().text().trim()
-          || $(el).text().trim();
-        const roleRaw = $(el).find('.role, .position, [class*="pos"]').text().trim()
-          || $(el).attr('data-pos') || '';
-        const numRaw = $(el).find('.num, .number, [class*="num"]').text().trim()
-          || $(el).attr('data-num') || '';
-        const isSub = $(el).closest('.bench, .substitutes, [class*="bench"]').length > 0;
+    // Strategia 1: usa data-name su li, distingui local/visitor dal span
+    $('li[data-name]').each((_, li) => {
+      const name = $(li).attr('data-name') || '';
+      if (!name || name.length < 2) return;
 
-        if (name && name.length > 1 && name.length < 40 && !name.match(/^\d+$/)) {
-          players.push({
-            name: cleanName(name),
-            prob: isSub ? 0 : 85,
-            role: normalizeRole(roleRaw),
-            num:  parseInt(numRaw) || 0,
-            isSub,
-          });
-        }
-      });
+      const numEl   = $(li).find('span.num');
+      const numText = numEl.text().trim();
+      const num     = parseInt(numText) || 0;
+      const isLocal = numEl.hasClass('local');
+      const isVisitor = numEl.hasClass('visitor');
+      const isSub   = $(li).closest('.subs, .substitutes, [class*="sub"]').length > 0;
 
-      if (players.length > 0) {
-        if (panelIdx === 0) homePlayers.push(...players);
-        else awayPlayers.push(...players);
+      const player = {
+        name: cleanName(name),
+        prob: isSub ? 0 : 85,
+        role: 'N/D',
+        num,
+        isSub,
+      };
+
+      if (isLocal)   homePlayers.push(player);
+      else if (isVisitor) awayPlayers.push(player);
+      else {
+        // fallback: primo pannello = home, secondo = away
+        const panel = $(li).closest('[class*="panel"], [class*="team"], ul').first();
+        const panelIdx = $('[class*="panel"], [class*="team"]').index(panel);
+        if (panelIdx <= 0) homePlayers.push(player);
+        else awayPlayers.push(player);
       }
     });
 
-    // Fallback: cerca tabelle o liste più semplici
-    if (homePlayers.length === 0) {
+    // Strategia 2: se data-name non ha trovato nulla, fallback su testo li
+    if (homePlayers.length === 0 && awayPlayers.length === 0) {
       let panelIdx = 0;
-      $('.team, .squad, [class*="team-"]').each((_, teamEl) => {
+      $('[class*="lineup"], [class*="team-box"], [class*="team_box"]').each((_, panel) => {
         const players = [];
-        $(teamEl).find('li, .row, tr').each((_, row) => {
-          const text = $(row).text().replace(/\s+/g, ' ').trim();
-          if (text.length > 2 && text.length < 50 && !text.match(/^\d+$/)) {
-            players.push({ name: cleanName(text), prob: 80, role: 'N/D', num: 0, isSub: false });
-          }
+        $(panel).find('li').each((_, li) => {
+          const name = cleanName($(li).text());
+          const num  = parseInt($(li).find('[class*="num"]').text()) || 0;
+          if (name.length > 2 && name.length < 40 && !name.match(/^\d+$/))
+            players.push({ name, prob: 85, role: 'N/D', num, isSub: false });
         });
         if (players.length >= 5) {
-          if (panelIdx === 0) homePlayers.push(...players.slice(0, 18));
-          else awayPlayers.push(...players.slice(0, 18));
+          if (panelIdx === 0) homePlayers.push(...players);
+          else awayPlayers.push(...players);
           panelIdx++;
         }
       });
@@ -86,6 +95,8 @@ async function scrapeMatchPage(matchUrl, league) {
     // Rileva modulo dal testo pagina
     const pageText = $.text();
     const formHome = (pageText.match(/\b([34][- ][1-5][- ][1-5][- ]?[1-3]?)\b/) || [])[1] || 'N/D';
+
+    logger.info(`[BeSoccer] ${matchUrl} → home:${homePlayers.length} away:${awayPlayers.length}`);
 
     return {
       homePlayers: homePlayers.filter(p => !p.isSub).slice(0, 11),
@@ -127,7 +138,8 @@ export async function scrapeLineups(league = 'premier_league') {
     const href = $(a).attr('href') || '';
     if (!href.includes('/en/match/')) return;
 
-    const urlMatch = href.match(/\/en\/match\/([^/]+)\/([^/]+)\//);
+    // Format: /en/match/{home}/{away}/{match_id}
+    const urlMatch = href.match(/\/en\/match\/([^/]+)\/([^/]+)\/(\d+)/);
     if (!urlMatch) return;
 
     const home = titleCase(urlMatch[1].replace(/-/g, ' '));
@@ -183,4 +195,3 @@ export async function scrapeLineups(league = 'premier_league') {
 
 function titleCase(str) {
   return str.replace(/\b\w/g, c => c.toUpperCase());
-}
