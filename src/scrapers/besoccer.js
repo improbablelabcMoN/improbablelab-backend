@@ -35,20 +35,11 @@ function cleanName(raw) {
   return raw.replace(/\s+/g, ' ').trim();
 }
 
-// ── Entry point principale: scrapa tutto dalla pagina campionato ─────────
-export async function scrapeLineups(league = 'premier_league') {
-  const slug = LEAGUE_SLUGS[league];
-  if (!slug) throw new Error(`BeSoccer: league '${league}' non supportata`);
-
-  const url = `${BASE}/en/competition/${slug}/`;
-  logger.info(`[BeSoccer] Scraping ${league} — ${url}`);
-
-  const html = await fetchHTML(url);
+// ── Estrae tutte le partite da una pagina HTML ──────────────────────────
+function parseMatchesFromHTML(html, league) {
   const $ = cheerio.load(html);
-
   const matches = [];
 
-  // Ogni partita è dentro div.card
   $('div.card').each((_, card) => {
     const $card = $(card);
 
@@ -62,19 +53,18 @@ export async function scrapeLineups(league = 'premier_league') {
     const homeName = cleanName($card.find('[id^="team1_"]').first().text());
     const awayName = cleanName($card.find('[id^="team2_"]').first().text());
 
-    if (!homeName || !awayName) return; // card non valida
+    if (!homeName || !awayName) return;
 
-    // ── Stato partita (Fin = terminata, Apl = rinviata) ─────
+    // ── Stato partita ───────────────────────────────────────
     const $tag = $card.find('[data-tag]').first();
     const tag  = ($tag.attr('data-tag') || '').toLowerCase();
     let staticStatus = 'scheduled';
     if (tag === 'fin')       staticStatus = 'final';
     else if (tag === 'live') staticStatus = 'live';
 
-    // ── Risultato (solo se terminata/live) ──────────────────
+    // ── Risultato ───────────────────────────────────────────
     let score = undefined;
-    const $result = $card.find('[id^="result_"]').first();
-    const resultSpan = $result.find('span[data-r1]').first();
+    const resultSpan = $card.find('[id^="result_"] span[data-r1]').first();
     if (resultSpan.length) {
       score = {
         home: parseInt(resultSpan.attr('data-r1')) || 0,
@@ -82,7 +72,7 @@ export async function scrapeLineups(league = 'premier_league') {
       };
     }
 
-    // ── Giocatori: ul.squad.local e ul.squad.visitor ─────────
+    // ── Giocatori ───────────────────────────────────────────
     function extractPlayers($ul) {
       const players = [];
       const formation = $ul.attr('data-tacticname') || 'N/D';
@@ -92,12 +82,7 @@ export async function scrapeLineups(league = 'premier_league') {
         const name = cleanName($(li).attr('data-name') || '');
         const num  = parseInt($(li).find('span').first().text().trim()) || 0;
         if (!name || name.length < 2) return;
-        players.push({
-          name,
-          num,
-          prob: isConfirmed ? 95 : 80,
-          role: 'N/D',
-        });
+        players.push({ name, num, prob: isConfirmed ? 95 : 80, role: 'N/D' });
       });
 
       return { players, formation, confirmed: isConfirmed };
@@ -109,48 +94,41 @@ export async function scrapeLineups(league = 'premier_league') {
     const homeExtracted = $localUl.length   ? extractPlayers($localUl)   : { players: [], formation: 'N/D', confirmed: false };
     const awayExtracted = $visitorUl.length ? extractPlayers($visitorUl) : { players: [], formation: 'N/D', confirmed: false };
 
-    // ── Struttura lineup per righe (semplificata: POR + outfield) ──
+    // ── Costruisci lineup per righe ─────────────────────────
     function buildLineup(players, formation) {
       if (players.length === 0) return [];
-      const por      = players.slice(0, 1);
-      const outfield = players.slice(1);
-      // Dividi outfield in 3 gruppi uguali basandoci sul modulo
+      const tokens = players.map(p => ({
+        n: p.name, num: p.num, p: p.prob, pos: 'N/D', shirt: '#1a5276',
+      }));
       const parts = formation.split('-').filter(p => /^\d+$/.test(p)).map(Number);
-      if (parts.length >= 3) {
-        let idx = 0;
-        const rows = [por];
+      if (parts.length >= 3 && tokens.length >= 11) {
+        const rows = [tokens.slice(0, 1)];
+        let idx = 1;
         for (const count of parts) {
-          rows.push(outfield.slice(idx, idx + count));
+          rows.push(tokens.slice(idx, idx + count));
           idx += count;
         }
         return rows.filter(r => r.length > 0);
       }
-      // Fallback: 3 righe da 3-4 giocatori
-      const rows = [por];
-      for (let i = 0; i < outfield.length; i += 4) {
-        rows.push(outfield.slice(i, i + 4));
+      // Fallback
+      const rows = [tokens.slice(0, 1)];
+      const outfield = tokens.slice(1);
+      const chunk = Math.ceil(outfield.length / 3);
+      for (let i = 0; i < outfield.length; i += chunk) {
+        rows.push(outfield.slice(i, i + chunk));
       }
-      return rows;
+      return rows.filter(r => r.length > 0);
     }
 
     function buildTeamData(extracted) {
       const { players, formation, confirmed } = extracted;
-      const lineup = buildLineup(
-        players.map(p => ({
-          n: p.name, num: p.num, p: p.prob, pos: 'N/D',
-          shirt: '#1a5276',
-        })),
-        formation
-      );
+      const lineup = buildLineup(players, formation);
       const playersList = players.map(p => ({
         n: p.name, pos: 'N/D', num: p.num, p: p.prob,
         rat: 6.5, g: 0, a: 0, app: 10, h: [],
       }));
       const source = {
-        id: 'besoccer',
-        name: 'BeSoccer',
-        form: formation,
-        time: 'ora',
+        id: 'besoccer', name: 'BeSoccer', form: formation, time: 'ora',
         players: players.map(p => p.name),
         conf: confirmed ? players.map(p => p.name) : [],
         doubt: [],
@@ -165,33 +143,64 @@ export async function scrapeLineups(league = 'premier_league') {
     }
 
     // ── ID partita ──────────────────────────────────────────
-    const href   = $matchLink.attr('href') || '';
+    const href = $matchLink.attr('href') || '';
     const matchIdMatch = href.match(/\/(\d+)$/);
     const matchId = matchIdMatch ? matchIdMatch[1] : `${Date.now()}`;
-    const id = `${league}_${homeName.toLowerCase().replace(/\s+/g,'_').slice(0,8)}_${matchId}`;
+    const safeHome = homeName.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8);
+    const id = `${league}_${safeHome}_${matchId}`;
 
-    // Conf: se entrambe le squadre hanno giocatori confermati → 90, altrimenti 65
     const hasHome = homeExtracted.players.length >= 11;
     const hasAway = awayExtracted.players.length >= 11;
     const conf = (hasHome && hasAway) ? 90 : (hasHome || hasAway) ? 75 : 60;
 
     matches.push({
-      id,
-      league,
-      home: homeName,
-      away: awayName,
-      date,
-      time,
-      staticStatus,
-      score,
-      conf,
-      homeColor: '#1a5276',
-      awayColor: '#922b21',
+      id, league, home: homeName, away: awayName,
+      date, time, staticStatus, score, conf,
+      homeColor: '#1a5276', awayColor: '#922b21',
       homeData: buildTeamData(homeExtracted),
       awayData: buildTeamData(awayExtracted),
     });
   });
 
-  logger.info(`[BeSoccer] Parsed ${matches.length} matches for ${league}`);
-  return matches.map(m => ({ source: 'besoccer', ...m }));
+  logger.info(`[BeSoccer] Parsed ${matches.length} matches from page`);
+  return matches;
+}
+
+// ── Entry point principale ──────────────────────────────────────────────
+export async function scrapeLineups(league = 'premier_league') {
+  const slug = LEAGUE_SLUGS[league];
+  if (!slug) throw new Error(`BeSoccer: league '${league}' non supportata`);
+
+  const mainUrl = `${BASE}/en/competition/${slug}/`;
+  logger.info(`[BeSoccer] Scraping ${league} — ${mainUrl}`);
+
+  // Carica pagina principale e trova il numero della giornata corrente
+  const html1 = await fetchHTML(mainUrl);
+  const $main = cheerio.load(html1);
+  const selectedOption = $main('option[selected]').val() || '';
+  const currentMatchday = parseInt(selectedOption.match(/matchday-(\d+)/)?.[1] || '0');
+
+  // Scrapa anche la giornata precedente (partite di oggi/ieri)
+  let html2 = null;
+  if (currentMatchday > 1) {
+    const prevUrl = `${BASE}/en/competition/${slug}/matchday-${currentMatchday - 1}`;
+    logger.info(`[BeSoccer] Also scraping previous matchday — ${prevUrl}`);
+    html2 = await fetchHTML(prevUrl).catch(err => {
+      logger.warn(`[BeSoccer] Previous matchday failed: ${err.message}`);
+      return null;
+    });
+  }
+
+  const matches1 = parseMatchesFromHTML(html1, league);
+  const matches2 = html2 ? parseMatchesFromHTML(html2, league) : [];
+
+  // Unisci evitando duplicati (priorità alla giornata corrente)
+  const seen = new Set(matches1.map(m => `${m.home}|${m.away}`));
+  const allMatches = [
+    ...matches1,
+    ...matches2.filter(m => !seen.has(`${m.home}|${m.away}`)),
+  ];
+
+  logger.info(`[BeSoccer] Total ${allMatches.length} matches for ${league} (current: ${matches1.length}, prev: ${matches2.length})`);
+  return allMatches.map(m => ({ source: 'besoccer', ...m }));
 }
