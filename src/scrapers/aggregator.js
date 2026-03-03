@@ -78,7 +78,7 @@ function mergeMatches(results, league) {
 // ── Crea struttura match vuota ─────────────────────────────────────────────
 function initMatch(item, league) {
   return {
-    id:      `${league}_${normalizeKey(item.homeTeam, item.awayTeam)}`,
+    id:      `${league}_${normalizeKey(item.homeTeam || item.home, item.awayTeam || item.away)}`,
     league,
     home: item.homeTeam || item.home,
     away: item.awayTeam || item.away,
