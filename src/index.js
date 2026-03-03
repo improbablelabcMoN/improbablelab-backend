@@ -26,11 +26,13 @@ async function startServer() {
     const { default: standingsRouter } = await import('./routes/standings.js');
     const { default: statsRouter }     = await import('./routes/stats.js');
     const { default: newsRouter }      = await import('./routes/news.js');
+    const { default: analysisRouter }  = await import('./routes/analysis.js');
 
     app.use('/api/lineups',   lineupsRouter);
     app.use('/api/standings', standingsRouter);
     app.use('/api/stats',     statsRouter);
     app.use('/api/news',      newsRouter);
+    app.use('/api/analysis',  analysisRouter);
 
     logger.info('Routes loaded OK');
   } catch (err) {
