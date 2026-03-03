@@ -61,7 +61,7 @@ function mergeMatches(results, league) {
     if (!r.ok || !r.data?.length) continue;
 
     for (const item of r.data) {
-      const key = normalizeKey(item.homeTeam, item.awayTeam);
+      const key = normalizeKey(item.homeTeam || item.home, item.awayTeam || item.away);
       if (!key) continue;
 
       if (!map.has(key)) {
@@ -80,8 +80,8 @@ function initMatch(item, league) {
   return {
     id:      `${league}_${normalizeKey(item.homeTeam, item.awayTeam)}`,
     league,
-    home:    item.homeTeam,
-    away:    item.awayTeam,
+    home: item.homeTeam || item.home,
+    away: item.awayTeam || item.away,
     date:    item.date    || '',
     time:    item.time    || '',
     staticStatus: 'scheduled',
