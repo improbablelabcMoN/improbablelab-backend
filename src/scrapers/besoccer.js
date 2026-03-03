@@ -13,7 +13,6 @@ export const LEAGUE_SLUGS = {
   champions_league: 'champions_league',
 };
 
-// Converte "18 FEB 2026" + "21:00" → "2026-02-18" e "21:00"
 function parseDateTime(dateStr, hourStr) {
   const MONTHS = {
     JAN:'01',FEB:'02',MAR:'03',APR:'04',MAY:'05',JUN:'06',
@@ -35,7 +34,6 @@ function cleanName(raw) {
   return raw.replace(/\s+/g, ' ').trim();
 }
 
-// ── Estrae tutte le partite da una pagina HTML ──────────────────────────
 function parseMatchesFromHTML(html, league) {
   const $ = cheerio.load(html);
   const matches = [];
@@ -43,26 +41,22 @@ function parseMatchesFromHTML(html, league) {
   $('div.card').each((_, card) => {
     const $card = $(card);
 
-    // ── Data e ora ──────────────────────────────────────────
     const dateText = $card.find('.card-header span.date').first().text().trim();
     const hourText = $card.find('.card-header span.hour').first().text().trim();
     const { date, time } = parseDateTime(dateText, hourText);
 
-    // ── Nomi squadre ────────────────────────────────────────
     const $matchLink = $card.find('a.match-link').first();
     const homeName = cleanName($card.find('[id^="team1_"]').first().text());
     const awayName = cleanName($card.find('[id^="team2_"]').first().text());
 
     if (!homeName || !awayName) return;
 
-    // ── Stato partita ───────────────────────────────────────
     const $tag = $card.find('[data-tag]').first();
     const tag  = ($tag.attr('data-tag') || '').toLowerCase();
     let staticStatus = 'scheduled';
     if (tag === 'fin')       staticStatus = 'final';
     else if (tag === 'live') staticStatus = 'live';
 
-    // ── Risultato ───────────────────────────────────────────
     let score = undefined;
     const resultSpan = $card.find('[id^="result_"] span[data-r1]').first();
     if (resultSpan.length) {
@@ -72,7 +66,6 @@ function parseMatchesFromHTML(html, league) {
       };
     }
 
-    // ── Giocatori ───────────────────────────────────────────
     function extractPlayers($ul) {
       const players = [];
       const formation = $ul.attr('data-tacticname') || 'N/D';
@@ -94,7 +87,6 @@ function parseMatchesFromHTML(html, league) {
     const homeExtracted = $localUl.length   ? extractPlayers($localUl)   : { players: [], formation: 'N/D', confirmed: false };
     const awayExtracted = $visitorUl.length ? extractPlayers($visitorUl) : { players: [], formation: 'N/D', confirmed: false };
 
-    // ── Costruisci lineup per righe ─────────────────────────
     function buildLineup(players, formation) {
       if (players.length === 0) return [];
       const tokens = players.map(p => ({
@@ -110,7 +102,6 @@ function parseMatchesFromHTML(html, league) {
         }
         return rows.filter(r => r.length > 0);
       }
-      // Fallback
       const rows = [tokens.slice(0, 1)];
       const outfield = tokens.slice(1);
       const chunk = Math.ceil(outfield.length / 3);
@@ -142,7 +133,6 @@ function parseMatchesFromHTML(html, league) {
       };
     }
 
-    // ── ID partita ──────────────────────────────────────────
     const href = $matchLink.attr('href') || '';
     const matchIdMatch = href.match(/\/(\d+)$/);
     const matchId = matchIdMatch ? matchIdMatch[1] : `${Date.now()}`;
@@ -180,27 +170,39 @@ export async function scrapeLineups(league = 'premier_league') {
   const selectedOption = $main('option[selected]').val() || '';
   const currentMatchday = parseInt(selectedOption.match(/matchday-(\d+)/)?.[1] || '0');
 
-  // Scrapa anche la giornata precedente (partite di oggi/ieri)
-  let html2 = null;
-  if (currentMatchday > 1) {
-    const prevUrl = `${BASE}/en/competition/${slug}/matchday-${currentMatchday - 1}`;
-    logger.info(`[BeSoccer] Also scraping previous matchday — ${prevUrl}`);
-    html2 = await fetchHTML(prevUrl).catch(err => {
-      logger.warn(`[BeSoccer] Previous matchday failed: ${err.message}`);
-      return null;
-    });
+  logger.info(`[BeSoccer] Current matchday: ${currentMatchday} for ${league}`);
+
+  // Scrapa le 2 giornate precedenti in parallelo
+  const prevHtmls = await Promise.all(
+    [1, 2].map(offset => {
+      const md = currentMatchday - offset;
+      if (md < 1) return Promise.resolve(null);
+      const url = `${BASE}/en/competition/${slug}/matchday-${md}`;
+      logger.info(`[BeSoccer] Fetching previous matchday ${md} — ${url}`);
+      return fetchHTML(url).catch(err => {
+        logger.warn(`[BeSoccer] matchday-${md} failed: ${err.message}`);
+        return null;
+      });
+    })
+  );
+
+  // Parsa tutte le pagine
+  const matches1 = parseMatchesFromHTML(html1, league);
+  const matches2 = prevHtmls[0] ? parseMatchesFromHTML(prevHtmls[0], league) : [];
+  const matches3 = prevHtmls[1] ? parseMatchesFromHTML(prevHtmls[1], league) : [];
+
+  // Unisci evitando duplicati — priorità alla giornata più recente
+  const seen = new Set();
+  const allMatches = [];
+
+  for (const m of [...matches1, ...matches2, ...matches3]) {
+    const key = `${m.home}|${m.away}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      allMatches.push(m);
+    }
   }
 
-  const matches1 = parseMatchesFromHTML(html1, league);
-  const matches2 = html2 ? parseMatchesFromHTML(html2, league) : [];
-
-  // Unisci evitando duplicati (priorità alla giornata corrente)
-  const seen = new Set(matches1.map(m => `${m.home}|${m.away}`));
-  const allMatches = [
-    ...matches1,
-    ...matches2.filter(m => !seen.has(`${m.home}|${m.away}`)),
-  ];
-
-  logger.info(`[BeSoccer] Total ${allMatches.length} matches for ${league} (current: ${matches1.length}, prev: ${matches2.length})`);
+  logger.info(`[BeSoccer] Total ${allMatches.length} matches for ${league} (md${currentMatchday}: ${matches1.length}, md${currentMatchday-1}: ${matches2.length}, md${currentMatchday-2}: ${matches3.length})`);
   return allMatches.map(m => ({ source: 'besoccer', ...m }));
 }
