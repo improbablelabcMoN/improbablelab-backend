@@ -111,8 +111,8 @@ function initMatch(item, league) {
 
 // ── Aggiunge una fonte al match ───────────────────────────────────────────
 function mergeSourceIntoMatch(match, item, sourceid) {
-  const homePlayers = item.homePlayers || item.starters || [];
-  const awayPlayers = item.awayPlayers || [];
+  const homePlayers = item.homePlayers || item.homeData?.players || item.starters || [];
+  const awayPlayers = item.awayPlayers || item.awayData?.players || [];
 
   // ── Home ──
   mergePlayers(match.homeData._playerMap, homePlayers, sourceid);
