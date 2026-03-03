@@ -22,8 +22,8 @@ router.get('/', async (req, res) => {
 });
 
 async function buildLeagueData(league) {
-  // Prova prima l'aggregatore (sosfanta, fantacalcio, fplitalia)
-  const aggregated = await aggregateLeague(league);
+  // Aggregatore disabilitato temporaneamente
+  const aggregated = { matches: [], sources: [] };
 
   // Prendi sempre i dati BeSoccer freschi
   let bsMatches = [];
