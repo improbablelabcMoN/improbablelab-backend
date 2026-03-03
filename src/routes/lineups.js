@@ -152,7 +152,7 @@ function buildLineup(players, formation) {
 
 function normKey(a, b) {
   if (!a || !b) return `${Date.now()}`;
-  const n = s => s.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8);
+  const n = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8);
   return `${n(a)}_${n(b)}`;
 }
 
