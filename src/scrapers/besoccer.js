@@ -166,7 +166,7 @@ export async function scrapeLineups(league = 'premier_league') {
   logger.info(`[BeSoccer] Found ${matchLinks.length} match links for ${league}`);
 
   // Limita a 8 partite max per evitare rate limiting
-  const toFetch = matchLinks.slice(0, 8);
+  const toFetch = matchLinks.slice(0, 12);
 
   const matches = [];
   for (const link of toFetch) {
@@ -186,7 +186,7 @@ export async function scrapeLineups(league = 'premier_league') {
     });
 
     // Pausa tra richieste per non bloccare
-    await new Promise(r => setTimeout(r, 800));
+    await new Promise(r => setTimeout(r, 400));
   }
 
   logger.info(`[BeSoccer] Scraped ${matches.length} matches with players for ${league}`);
