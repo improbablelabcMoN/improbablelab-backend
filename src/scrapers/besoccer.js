@@ -13,113 +13,29 @@ export const LEAGUE_SLUGS = {
   champions_league: 'champions_league',
 };
 
-// Mappa ruoli BeSoccer → label leggibile
-const ROLE_MAP = {
-  por: 'POR', gk: 'POR', goalkeeper: 'POR',
-  def: 'DIF', defender: 'DIF', cb: 'DIF', lb: 'DIF', rb: 'DIF', wb: 'DIF',
-  mid: 'CEN', midfielder: 'CEN', cm: 'CEN', dm: 'CEN', am: 'CEN',
-  att: 'ATT', forward: 'ATT', fw: 'ATT', st: 'ATT', lw: 'ATT', rw: 'ATT',
-};
-
-function normalizeRole(raw = '') {
-  return ROLE_MAP[raw.toLowerCase().trim()] || 'N/D';
-}
-
-// ── Scrape pagina singola partita per ottenere i giocatori ──────────────
-async function scrapeMatchPage(matchUrl, league) {
+// Converte "18 FEB 2026" + "21:00" → "2026-02-18" e "21:00"
+function parseDateTime(dateStr, hourStr) {
+  const MONTHS = {
+    JAN:'01',FEB:'02',MAR:'03',APR:'04',MAY:'05',JUN:'06',
+    JUL:'07',AUG:'08',SEP:'09',OCT:'10',NOV:'11',DEC:'12'
+  };
   try {
-    const html = await fetchHTML(matchUrl);
-    const $ = cheerio.load(html);
-    const homePlayers = [];
-    const awayPlayers = [];
-
-    // BeSoccer struttura reale:
-    // <li data-name="Mile Svilar">
-    //   <div class="player-img">
-    //     <span class="num local">99</span>
-    //   </div>
-    // </li>
-    // I giocatori di casa hanno span.num.local, quelli in trasferta span.num.visitor
-    // Le liste sono dentro .panel-lineup o .team-lineup separati per squadra
-
-    // Strategia 1: usa data-name su li, distingui local/visitor dal span
-    $('li[data-name]').each((_, li) => {
-      const name = $(li).attr('data-name') || '';
-      if (!name || name.length < 2) return;
-
-      const numEl   = $(li).find('span.num');
-      const numText = numEl.text().trim();
-      const num     = parseInt(numText) || 0;
-      const isLocal = numEl.hasClass('local');
-      const isVisitor = numEl.hasClass('visitor');
-      const isSub   = $(li).closest('.subs, .substitutes, [class*="sub"]').length > 0;
-
-      const player = {
-        name: cleanName(name),
-        prob: isSub ? 0 : 85,
-        role: 'N/D',
-        num,
-        isSub,
-      };
-
-      if (isLocal)   homePlayers.push(player);
-      else if (isVisitor) awayPlayers.push(player);
-      else {
-        // fallback: primo pannello = home, secondo = away
-        const panel = $(li).closest('[class*="panel"], [class*="team"], ul').first();
-        const panelIdx = $('[class*="panel"], [class*="team"]').index(panel);
-        if (panelIdx <= 0) homePlayers.push(player);
-        else awayPlayers.push(player);
-      }
-    });
-
-    // Strategia 2: se data-name non ha trovato nulla, fallback su testo li
-    if (homePlayers.length === 0 && awayPlayers.length === 0) {
-      let panelIdx = 0;
-      $('[class*="lineup"], [class*="team-box"], [class*="team_box"]').each((_, panel) => {
-        const players = [];
-        $(panel).find('li').each((_, li) => {
-          const name = cleanName($(li).text());
-          const num  = parseInt($(li).find('[class*="num"]').text()) || 0;
-          if (name.length > 2 && name.length < 40 && !name.match(/^\d+$/))
-            players.push({ name, prob: 85, role: 'N/D', num, isSub: false });
-        });
-        if (players.length >= 5) {
-          if (panelIdx === 0) homePlayers.push(...players);
-          else awayPlayers.push(...players);
-          panelIdx++;
-        }
-      });
+    const parts = dateStr.trim().toUpperCase().split(/\s+/);
+    if (parts.length === 3) {
+      const day   = parts[0].padStart(2, '0');
+      const month = MONTHS[parts[1]] || '01';
+      const year  = parts[2];
+      return { date: `${year}-${month}-${day}`, time: hourStr.trim() };
     }
-
-    // Rileva modulo dal testo pagina
-    const pageText = $.text();
-    const formHome = (pageText.match(/\b([34][- ][1-5][- ][1-5][- ]?[1-3]?)\b/) || [])[1] || 'N/D';
-
-    logger.info(`[BeSoccer] ${matchUrl} → home:${homePlayers.length} away:${awayPlayers.length}`);
-
-    return {
-      homePlayers: homePlayers.filter(p => !p.isSub).slice(0, 11),
-      awayPlayers: awayPlayers.filter(p => !p.isSub).slice(0, 11),
-      homeBench:   homePlayers.filter(p => p.isSub).slice(0, 9),
-      awayBench:   awayPlayers.filter(p => p.isSub).slice(0, 9),
-      formation:   formHome,
-    };
-  } catch (err) {
-    logger.warn(`[BeSoccer] Match page failed: ${matchUrl} — ${err.message}`);
-    return { homePlayers: [], awayPlayers: [], homeBench: [], awayBench: [], formation: 'N/D' };
-  }
+  } catch (_) {}
+  return { date: '', time: hourStr.trim() };
 }
 
 function cleanName(raw) {
-  return raw
-    .replace(/\d{1,3}%/g, '')
-    .replace(/^[\d\s.]+/, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return raw.replace(/\s+/g, ' ').trim();
 }
 
-// ── Entry point principale ──────────────────────────────────────────────
+// ── Entry point principale: scrapa tutto dalla pagina campionato ─────────
 export async function scrapeLineups(league = 'premier_league') {
   const slug = LEAGUE_SLUGS[league];
   if (!slug) throw new Error(`BeSoccer: league '${league}' non supportata`);
@@ -130,69 +46,152 @@ export async function scrapeLineups(league = 'premier_league') {
   const html = await fetchHTML(url);
   const $ = cheerio.load(html);
 
-  // Raccoglie tutti i link partita univoci
-  const matchLinks = [];
-  const seen = new Set();
+  const matches = [];
 
-  $('a[href]').each((_, a) => {
-    const href = $(a).attr('href') || '';
-    if (!href.includes('/en/match/')) return;
+  // Ogni partita è dentro div.card
+  $('div.card').each((_, card) => {
+    const $card = $(card);
 
-    // Format: /en/match/{home}/{away}/{match_id}
-    const urlMatch = href.match(/\/en\/match\/([^/]+)\/([^/]+)\/(\d+)/);
-    if (!urlMatch) return;
+    // ── Data e ora ──────────────────────────────────────────
+    const dateText = $card.find('.card-header span.date').first().text().trim();
+    const hourText = $card.find('.card-header span.hour').first().text().trim();
+    const { date, time } = parseDateTime(dateText, hourText);
 
-    const home = titleCase(urlMatch[1].replace(/-/g, ' '));
-    const away = titleCase(urlMatch[2].replace(/-/g, ' '));
-    const key  = `${home}|${away}`;
-    if (seen.has(key)) return;
-    seen.add(key);
+    // ── Nomi squadre ────────────────────────────────────────
+    const $matchLink = $card.find('a.match-link').first();
+    const homeName = cleanName($card.find('[id^="team1_"]').first().text());
+    const awayName = cleanName($card.find('[id^="team2_"]').first().text());
 
-    const $card     = $(a).closest('[class*="match"], [class*="game"], li, .panel');
-    const cardText  = $card.text().toLowerCase();
-    const confirmed = cardText.includes('confirmed') || cardText.includes('confermata');
+    if (!homeName || !awayName) return; // card non valida
 
-    // Data/ora dal card
-    const timeText  = $card.find('[class*="time"], [class*="date"], time').first().text().trim();
+    // ── Stato partita (Fin = terminata, Apl = rinviata) ─────
+    const $tag = $card.find('[data-tag]').first();
+    const tag  = ($tag.attr('data-tag') || '').toLowerCase();
+    let staticStatus = 'scheduled';
+    if (tag === 'fin')       staticStatus = 'final';
+    else if (tag === 'live') staticStatus = 'live';
 
-    matchLinks.push({
-      home, away,
-      matchUrl:    href.startsWith('http') ? href : `${BASE}${href}`,
-      isConfirmed: confirmed,
-      timeText,
+    // ── Risultato (solo se terminata/live) ──────────────────
+    let score = undefined;
+    const $result = $card.find('[id^="result_"]').first();
+    const resultSpan = $result.find('span[data-r1]').first();
+    if (resultSpan.length) {
+      score = {
+        home: parseInt(resultSpan.attr('data-r1')) || 0,
+        away: parseInt(resultSpan.attr('data-r2')) || 0,
+      };
+    }
+
+    // ── Giocatori: ul.squad.local e ul.squad.visitor ─────────
+    function extractPlayers($ul) {
+      const players = [];
+      const formation = $ul.attr('data-tacticname') || 'N/D';
+      const isConfirmed = $ul.hasClass('confirmed');
+
+      $ul.find('li[data-name]').each((_, li) => {
+        const name = cleanName($(li).attr('data-name') || '');
+        const num  = parseInt($(li).find('span').first().text().trim()) || 0;
+        if (!name || name.length < 2) return;
+        players.push({
+          name,
+          num,
+          prob: isConfirmed ? 95 : 80,
+          role: 'N/D',
+        });
+      });
+
+      return { players, formation, confirmed: isConfirmed };
+    }
+
+    const $localUl   = $card.find('ul.squad.local').first();
+    const $visitorUl = $card.find('ul.squad.visitor').first();
+
+    const homeExtracted = $localUl.length   ? extractPlayers($localUl)   : { players: [], formation: 'N/D', confirmed: false };
+    const awayExtracted = $visitorUl.length ? extractPlayers($visitorUl) : { players: [], formation: 'N/D', confirmed: false };
+
+    // ── Struttura lineup per righe (semplificata: POR + outfield) ──
+    function buildLineup(players, formation) {
+      if (players.length === 0) return [];
+      const por      = players.slice(0, 1);
+      const outfield = players.slice(1);
+      // Dividi outfield in 3 gruppi uguali basandoci sul modulo
+      const parts = formation.split('-').filter(p => /^\d+$/.test(p)).map(Number);
+      if (parts.length >= 3) {
+        let idx = 0;
+        const rows = [por];
+        for (const count of parts) {
+          rows.push(outfield.slice(idx, idx + count));
+          idx += count;
+        }
+        return rows.filter(r => r.length > 0);
+      }
+      // Fallback: 3 righe da 3-4 giocatori
+      const rows = [por];
+      for (let i = 0; i < outfield.length; i += 4) {
+        rows.push(outfield.slice(i, i + 4));
+      }
+      return rows;
+    }
+
+    function buildTeamData(extracted) {
+      const { players, formation, confirmed } = extracted;
+      const lineup = buildLineup(
+        players.map(p => ({
+          n: p.name, num: p.num, p: p.prob, pos: 'N/D',
+          shirt: '#1a5276',
+        })),
+        formation
+      );
+      const playersList = players.map(p => ({
+        n: p.name, pos: 'N/D', num: p.num, p: p.prob,
+        rat: 6.5, g: 0, a: 0, app: 10, h: [],
+      }));
+      const source = {
+        id: 'besoccer',
+        name: 'BeSoccer',
+        form: formation,
+        time: 'ora',
+        players: players.map(p => p.name),
+        conf: confirmed ? players.map(p => p.name) : [],
+        doubt: [],
+      };
+      return {
+        form: formation,
+        lineup,
+        bench: [],
+        sources: players.length > 0 ? [source] : [],
+        players: playersList,
+      };
+    }
+
+    // ── ID partita ──────────────────────────────────────────
+    const href   = $matchLink.attr('href') || '';
+    const matchIdMatch = href.match(/\/(\d+)$/);
+    const matchId = matchIdMatch ? matchIdMatch[1] : `${Date.now()}`;
+    const id = `${league}_${homeName.toLowerCase().replace(/\s+/g,'_').slice(0,8)}_${matchId}`;
+
+    // Conf: se entrambe le squadre hanno giocatori confermati → 90, altrimenti 65
+    const hasHome = homeExtracted.players.length >= 11;
+    const hasAway = awayExtracted.players.length >= 11;
+    const conf = (hasHome && hasAway) ? 90 : (hasHome || hasAway) ? 75 : 60;
+
+    matches.push({
+      id,
+      league,
+      home: homeName,
+      away: awayName,
+      date,
+      time,
+      staticStatus,
+      score,
+      conf,
+      homeColor: '#1a5276',
+      awayColor: '#922b21',
+      homeData: buildTeamData(homeExtracted),
+      awayData: buildTeamData(awayExtracted),
     });
   });
 
-  logger.info(`[BeSoccer] Found ${matchLinks.length} match links for ${league}`);
-
-  // Limita a 8 partite max per evitare rate limiting
-  const toFetch = matchLinks.slice(0, 12);
-
-  const matches = [];
-  for (const link of toFetch) {
-    const details = await scrapeMatchPage(link.matchUrl, league);
-    matches.push({
-      source:      'besoccer',
-      league,
-      homeTeam:    link.home,
-      awayTeam:    link.away,
-      matchUrl:    link.matchUrl,
-      isConfirmed: link.isConfirmed,
-      homePlayers: details.homePlayers,
-      awayPlayers: details.awayPlayers,
-      bench:       details.homeBench,
-      formation:   details.formation,
-      scrapedAt:   new Date().toISOString(),
-    });
-
-    // Pausa tra richieste per non bloccare
-    await new Promise(r => setTimeout(r, 400));
-  }
-
-  logger.info(`[BeSoccer] Scraped ${matches.length} matches with players for ${league}`);
-  return matches;
+  logger.info(`[BeSoccer] Parsed ${matches.length} matches for ${league}`);
+  return matches.map(m => ({ source: 'besoccer', ...m }));
 }
-
-function titleCase(str) {
-  return str.replace(/\b\w/g, c => c.toUpperCase());
-}  
