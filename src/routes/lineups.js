@@ -4,7 +4,7 @@ import { aggregateLeague } from '../scrapers/aggregator.js';
 import { logger } from '../index.js';
 
 const router = Router();
-const LEAGUES = ['serie_a','premier_league','la_liga','bundesliga','ligue_1','champions_league'];
+const LEAGUES = ['serie_a','premier_league','la_liga','bundesliga','ligue_1','champions_league','europa_league'];
 
 router.get('/', async (req, res) => {
   const { league = 'serie_a' } = req.query;
