@@ -1,4 +1,4 @@
-  import * as cheerio from 'cheerio';
+import * as cheerio from 'cheerio';
 import { fetchHTML } from './http.js';
 import { logger } from '../index.js';
 
@@ -165,45 +165,51 @@ export async function scrapeLineups(league = 'premier_league') {
   const mainUrl = `${BASE}/en/competition/${slug}/`;
   logger.info(`[BeSoccer] Scraping ${league} — ${mainUrl}`);
 
-  // Carica pagina principale e trova il numero della giornata corrente
   const html1 = await fetchHTML(mainUrl);
   const $main = cheerio.load(html1);
-  const selectedOption = $main('option[selected]').val() || '';
-  const currentMatchday = parseInt(selectedOption.match(/matchday-(\d+)/)?.[1] || '0');
 
-  logger.info(`[BeSoccer] Current matchday: ${currentMatchday} for ${league}`);
+  // Leggi tutte le opzioni del select giornate (funziona sia per matchday-N che per round slug)
+  const allOptions = [];
+  $main('option').each((_, el) => {
+    const val = $main(el).attr('value') || '';
+    if (val.includes('/')) allOptions.push(val); // es: /en/competition/europa_league/round-of-16
+  });
 
-  // Scrapa le 2 giornate precedenti in parallelo
-  const prevHtmls = await Promise.all(
-    [1, 2].map(offset => {
-      const md = currentMatchday - offset;
-      if (md < 1) return Promise.resolve(null);
-      const url = `${BASE}/en/competition/${slug}/matchday-${md}`;
-      logger.info(`[BeSoccer] Fetching previous matchday ${md} — ${url}`);
+  // Trova l'opzione selezionata
+  const selectedVal = $main('option[selected]').attr('value') || '';
+  const selectedIdx = allOptions.indexOf(selectedVal);
+
+  logger.info(`[BeSoccer] ${league}: ${allOptions.length} rounds, current="${selectedVal}" (idx=${selectedIdx})`);
+
+  // Prendi l'opzione corrente + le 2 precedenti
+  const toFetch = [selectedVal];
+  if (selectedIdx > 0) toFetch.push(allOptions[selectedIdx - 1]);
+  if (selectedIdx > 1) toFetch.push(allOptions[selectedIdx - 2]);
+
+  // Fetch in parallelo (skip la prima che abbiamo già)
+  const extraHtmls = await Promise.all(
+    toFetch.slice(1).map(optVal => {
+      const url = optVal.startsWith('http') ? optVal : `${BASE}${optVal}`;
+      logger.info(`[BeSoccer] Fetching round: ${url}`);
       return fetchHTML(url).catch(err => {
-        logger.warn(`[BeSoccer] matchday-${md} failed: ${err.message}`);
+        logger.warn(`[BeSoccer] round fetch failed: ${err.message}`);
         return null;
       });
     })
   );
 
   // Parsa tutte le pagine
-  const matches1 = parseMatchesFromHTML(html1, league);
-  const matches2 = prevHtmls[0] ? parseMatchesFromHTML(prevHtmls[0], league) : [];
-  const matches3 = prevHtmls[1] ? parseMatchesFromHTML(prevHtmls[1], league) : [];
-
-  // Unisci evitando duplicati — priorità alla giornata più recente
   const seen = new Set();
   const allMatches = [];
 
-  for (const m of [...matches1, ...matches2, ...matches3]) {
-    const key = `${m.home}|${m.away}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      allMatches.push(m);
+  for (const html of [html1, ...extraHtmls]) {
+    if (!html) continue;
+    for (const m of parseMatchesFromHTML(html, league)) {
+      const key = `${m.home}|${m.away}`;
+      if (!seen.has(key)) { seen.add(key); allMatches.push(m); }
     }
   }
 
-  logger.info(`[BeSoccer] Total ${allMatches.length} matches for ${league} (md${currentMatchday}: ${matches1.length}, md${currentMatchday-1}: ${matches2.length}, md${currentMatchday-2}: ${matches3.length})`);
+  logger.info(`[BeSoccer] Total ${allMatches.length} matches for ${league}`);
   return allMatches.map(m => ({ source: 'besoccer', ...m }));
 }
