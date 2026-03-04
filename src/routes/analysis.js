@@ -1,6 +1,6 @@
 /**
  * /api/analysis — AI-powered match analysis
- * Uses Gemini 2.0 Flash + Google Search grounding (gratuito)
+ * Uses Gemini 2.0 Flash Lite + Google Search grounding
  * Cache: 30 min in-memory Map
  */
 
@@ -9,10 +9,10 @@ import { logger } from '../index.js';
 
 const router = Router();
 
-const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent';
+const GEMINI_MODEL = 'gemini-2.0-flash-lite';
+const GEMINI_API = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 const CACHE_TTL_MS = (Number(process.env.CACHE_TTL_ANALYSIS) || 1800) * 1000;
 
-// Simple in-memory cache
 const doneCache = new Map();
 const jobStatus = new Map();
 
@@ -25,6 +25,19 @@ function cacheGet(key) {
 
 function cacheSet(key, data) {
   doneCache.set(key, { data, expiresAt: Date.now() + CACHE_TTL_MS });
+}
+
+async function callGemini(apiKey, body) {
+  const res = await fetch(`${GEMINI_API}?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Gemini API error ${res.status}: ${err}`);
+  }
+  return res.json();
 }
 
 async function generateAnalysis({ home, away, league, date, time }) {
@@ -44,7 +57,7 @@ Cerca informazioni aggiornate su questa partita e restituisci SOLO un oggetto JS
     "note": "breve nota atmosfera/tifoseria"
   },
   "news": [
-    { "type": "injury", "team": "nome squadra", "player": "nome giocatore o null", "text": "testo notizia breve", "impact": "high|medium|low" }
+    { "type": "injury|suspension|form|transfer|other", "team": "nome squadra", "player": "nome giocatore o null", "text": "testo notizia breve", "impact": "high|medium|low" }
   ],
   "lineup_reasoning": {
     "home": "2-3 frasi sul probabile modulo e scelte tattiche della squadra di casa",
@@ -69,52 +82,32 @@ Sii preciso, usa dati reali cercati sul web. Le percentuali forecast devono somm
   const body = {
     contents: [{ parts: [{ text: prompt }] }],
     tools: [{ google_search: {} }],
-    generationConfig: {
-      temperature: 0.2,
-      maxOutputTokens: 1500,
-    },
+    generationConfig: { temperature: 0.2, maxOutputTokens: 1500 },
   };
 
-  const response = await fetch(`${GEMINI_API}?key=${apiKey}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    // Rate limit → aspetta 30s e riprova
-    if (response.status === 429) {
-      logger.warn(`Gemini rate limit — waiting 30s before retry...`);
-      await new Promise(r => setTimeout(r, 30000));
-      const retry = await fetch(`${GEMINI_API}?key=${apiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!retry.ok) {
-        const retryErr = await retry.text();
-        throw new Error(`Gemini API error ${retry.status}: ${retryErr}`);
-      }
-      const retryData = await retry.json();
-      return parseGeminiResponse(retryData);
+  let data;
+  try {
+    data = await callGemini(apiKey, body);
+  } catch (err) {
+    if (err.message.includes('429')) {
+      logger.warn(`Gemini rate limit — waiting 60s before retry...`);
+      await new Promise(r => setTimeout(r, 60000));
+      data = await callGemini(apiKey, body);
+    } else {
+      throw err;
     }
-    throw new Error(`Gemini API error ${response.status}: ${errText}`);
   }
 
-  const data = await response.json();
   return parseGeminiResponse(data);
 }
 
 function parseGeminiResponse(data) {
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error('No text response from Gemini');
-
   const raw = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
   const start = raw.indexOf('{');
   const end = raw.lastIndexOf('}');
   if (start === -1 || end === -1) throw new Error('No JSON found in Gemini response');
-
   return JSON.parse(raw.slice(start, end + 1));
 }
 
@@ -136,12 +129,10 @@ function startJob(cacheKey, params) {
     });
 }
 
-// GET /api/analysis?home=Roma&away=Milan&league=Serie+A&date=2026-03-01&time=20:45
 router.get('/', (req, res) => {
   const { home, away, league, date, time } = req.query;
-
   if (!home || !away || !league || !date) {
-    return res.status(400).json({ error: 'Missing required params: home, away, league, date' });
+    return res.status(400).json({ error: 'Missing required params' });
   }
 
   const cacheKey = `${league}__${home}__${away}__${date}`.toLowerCase().replace(/\s+/g, '_');
