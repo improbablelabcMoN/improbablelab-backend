@@ -334,31 +334,27 @@ router.get('/debug', async (req, res) => {
 // ── Debug UEL ────────────────────────────────────────────────────────────
 router.get('/debug-uel', async (req, res) => {
   const results = {};
-  const sources = {
-    search:  'https://www.thesportsdb.com/api/v1/json/3/search_all_leagues.php?c=Europe&s=Soccer',
-    id_4735: 'https://www.thesportsdb.com/api/v1/json/3/eventsseason.php?id=4735&s=2024-2025',
-    id_4736: 'https://www.thesportsdb.com/api/v1/json/3/eventsseason.php?id=4736&s=2024-2025',
-    id_4532: 'https://www.thesportsdb.com/api/v1/json/3/eventsseason.php?id=4532&s=2024-2025',
-  };
-  for (const [name, url] of Object.entries(sources)) {
-    try {
-      const data = await fetchJSON(url);
-      if (name === 'search') {
-        const uel = (data.countrys || data.leagues || [])
-          .filter(l => (l.strLeague||'').toLowerCase().includes('europa'))
-          .map(l => ({ id: l.idLeague, name: l.strLeague }));
-        results[name] = { ok: true, uel };
-      } else {
-        const events = data.events || [];
-        results[name] = {
-          ok: true, count: events.length,
-          league: events[0]?.strLeague,
-          first: events[0] ? { date: events[0].dateEvent, home: events[0].strHomeTeam, away: events[0].strAwayTeam } : null,
-        };
-      }
-    } catch(err) {
-      results[name] = { ok: false, error: err.message };
+  try {
+    // 1. Cerca tutte le leghe europee di calcio su TheSportsDB
+    const all = await fetchJSON('https://www.thesportsdb.com/api/v1/json/3/all_leagues.php');
+    const europa = (all.leagues || []).filter(l =>
+      (l.strLeague||'').toLowerCase().includes('europa') ||
+      (l.strLeague||'').toLowerCase().includes('uel')
+    );
+    results.allLeaguesSearch = europa.map(l => ({ id: l.idLeague, name: l.strLeague, sport: l.strSport }));
+
+    // 2. Prova ID noti per UEL da fonti online
+    for (const id of ['4480','4481','4934','4962','5337','5338','5339']) {
+      try {
+        const d = await fetchJSON(`https://www.thesportsdb.com/api/v1/json/3/lookupleague.php?id=${id}`);
+        const league = d.leagues?.[0];
+        if (league && (league.strLeague||'').toLowerCase().includes('europa')) {
+          results[`id_${id}`] = { name: league.strLeague, country: league.strCountry };
+        }
+      } catch(e) {}
     }
+  } catch(err) {
+    results.error = err.message;
   }
   res.json(results);
 });
