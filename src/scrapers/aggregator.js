@@ -4,20 +4,18 @@ import { scrapeLineups as fantacalcio } from './fantacalcio.js';
 import { scrapeLineups as fplitalia }   from './fplitalia.js';
 import { scrapeLineups as besoccer }    from './besoccer.js';
 import { scrapeLineups as fantagazzetta } from './fantagazzetta.js';
-import { scrapeLineups as apifootball } from './apifootball.js';
+import { findFixture, getInjuries, getConfirmedLineup, normalizePosition } from './apifootball.js';
 
 const SCRAPERS = {
   serie_a:         [
-    { name: 'apifootball', fn: () => apifootball('serie_a') },
+    { name: 'besoccer',    fn: () => besoccer('serie_a') },
     { name: 'sosfanta',    fn: sosfanta },
     { name: 'fantacalcio', fn: fantacalcio },
-    { name: 'besoccer',    fn: () => besoccer('serie_a') },
     { name: 'fantagazzetta', fn: fantagazzetta },
   ],
   premier_league:  [
-    { name: 'apifootball', fn: () => apifootball('premier_league') },
-    { name: 'fplitalia', fn: fplitalia },
     { name: 'besoccer',  fn: () => besoccer('premier_league') },
+    { name: 'fplitalia', fn: fplitalia },
   ],
   la_liga:         [{ name: 'besoccer', fn: () => besoccer('la_liga') }],
   bundesliga:      [{ name: 'besoccer', fn: () => besoccer('bundesliga') }],
@@ -53,8 +51,10 @@ export async function aggregateLeague(league) {
     error: s.error || null,
   }));
 
-  logger.info(`[Aggregator] ${league}: ${matches.length} matches from ${sources.filter(s => s.ok).length}/${sources.length} sources`);
-  return { matches, sources, scrapedAt: new Date().toISOString() };
+  // ── Arricchimento con API-Football (infortuni + venue + lineup confermata) ──
+  const enriched = await enrichMatches(matches, league);
+  logger.info(`[Aggregator] ${league}: ${enriched.length} matches from ${sources.filter(s => s.ok).length}/${sources.length} sources`);
+  return { matches: enriched, sources, scrapedAt: new Date().toISOString() };
 }
 
 // ── Merge partite da più fonti ────────────────────────────────────────────
@@ -293,6 +293,60 @@ function timeAgo(iso) {
   if (!iso) return 'N/D';
   const m = Math.floor((Date.now() - new Date(iso)) / 60000);
   return m < 1 ? 'ora' : m < 60 ? `${m}m fa` : `${Math.floor(m / 60)}h fa`;
+}
+
+
+// ── Arricchimento API-Football ────────────────────────────────────────────────
+async function enrichMatches(matches, league) {
+  if (!process.env.API_FOOTBALL_KEY) return matches;
+  const enriched = [];
+  for (const match of matches) {
+    try {
+      const fixture = await findFixture(league, match.home, match.away);
+      if (fixture) {
+        // Aggiungi venue/stadio
+        if (fixture.venue) match.venue = fixture.venue;
+        if (fixture.city)  match.city  = fixture.city;
+        match.fixtureId = fixture.fixtureId;
+
+        // Infortuni (solo se partita entro 7 giorni)
+        const matchDate = new Date(match.date || fixture.date);
+        const daysUntil = (matchDate - Date.now()) / (1000 * 60 * 60 * 24);
+        if (daysUntil <= 7 && daysUntil >= -1) {
+          const injuries = await getInjuries(fixture.fixtureId);
+          if (injuries.length) match.injuries = injuries;
+        }
+
+        // Lineup confermata (se partita oggi o domani)
+        if (daysUntil <= 1 && daysUntil >= -0.5) {
+          const lineup = await getConfirmedLineup(fixture.fixtureId);
+          if (lineup?.length === 2) {
+            logger.info(`[Enrichment] Confirmed lineup for ${match.home} vs ${match.away}`);
+            const homeL = lineup.find(l => l.team?.name === fixture.homeName);
+            const awayL = lineup.find(l => l.team?.name === fixture.awayName);
+            if (homeL?.startXI?.length) {
+              const confirmedHome = homeL.startXI.map(p => ({
+                name: p.player?.name,
+                num:  p.player?.number,
+                role: normalizePosition(p.player?.pos),
+                prob: 99,
+              }));
+              // Sovrascrive i top 11 con lineup confermata
+              match.homeData = match.homeData || {};
+              match.homeData.confirmedLineup = confirmedHome;
+              match.homeData.formation = homeL.formation || match.homeData?.form;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      logger.warn(`[Enrichment] ${match.home} vs ${match.away}: ${err.message}`);
+    }
+    enriched.push(match);
+    // Piccola pausa per rispettare rate limit
+    await new Promise(r => setTimeout(r, 200));
+  }
+  return enriched;
 }
 
 function sourceName(id) {
