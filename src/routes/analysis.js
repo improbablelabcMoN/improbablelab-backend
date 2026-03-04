@@ -71,7 +71,7 @@ Cerca informazioni aggiornate su questa partita e restituisci SOLO un oggetto JS
 
 Sii preciso, usa dati reali cercati sul web. Le percentuali forecast devono sommare a 100.`;
 
-  const response = await fetch(ANTHROPIC_API, {
+  let response = await fetch(ANTHROPIC_API, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -87,8 +87,33 @@ Sii preciso, usa dati reali cercati sul web. Le percentuali forecast devono somm
   });
 
   if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Anthropic API error ${response.status}: ${err}`);
+    const errText = await response.text();
+    // Rate limit (529 o 429) → aspetta 35s e riprova una volta
+    if (response.status === 429 || response.status === 529) {
+      logger.warn(`Rate limit hit — waiting 35s before retry...`);
+      await new Promise(r => setTimeout(r, 35000));
+      const retry = await fetch(ANTHROPIC_API, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          max_tokens: 1500,
+          tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      });
+      if (!retry.ok) {
+        const retryErr = await retry.text();
+        throw new Error(`Anthropic API error ${retry.status}: ${retryErr}`);
+      }
+      response = retry; // usa la risposta del retry
+    } else {
+      throw new Error(`Anthropic API error ${response.status}: ${errText}`);
+    }
   }
 
   const data = await response.json();
