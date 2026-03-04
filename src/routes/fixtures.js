@@ -275,4 +275,40 @@ router.get('/live', async (req, res) => {
   }
 });
 
+// ── Route diagnostica (solo dev) — mostra risposta grezza API-Football ──
+router.get('/debug', async (req, res) => {
+  const { league = 'la_liga' } = req.query;
+  const leagueId = LEAGUE_IDS[league];
+  const apiKey   = process.env.API_FOOTBALL_KEY;
+
+  if (!leagueId) return res.status(400).json({ error: 'League non supportata' });
+  if (!apiKey)   return res.status(503).json({ error: 'API_FOOTBALL_KEY mancante' });
+
+  const season = getSeasonFor(league);
+  const from   = new Date(Date.now() - 7  * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const to     = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const url    = `${BASE}/fixtures?league=${leagueId}&season=${season}&from=${from}&to=${to}`;
+
+  try {
+    const data = await fetchJSON(url, { headers: { 'x-apisports-key': apiKey } });
+    res.json({
+      debug: true,
+      league, leagueId, season, from, to, url,
+      apiErrors: data.errors,
+      resultsCount: data.results,
+      paging: data.paging,
+      firstThree: (data.response || []).slice(0, 3).map(f => ({
+        id: f.fixture.id,
+        date: f.fixture.date,
+        status: f.fixture.status,
+        home: f.teams.home.name,
+        away: f.teams.away.name,
+        round: f.league.round,
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message, url });
+  }
+});
+
 export default router;
