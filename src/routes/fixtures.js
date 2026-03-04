@@ -331,21 +331,32 @@ router.get('/debug', async (req, res) => {
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
-// ── Debug UEL: mostra HTML grezzo BeSoccer ──────────────────────────────
+// ── Debug UEL: prova più sorgenti ───────────────────────────────────────
 router.get('/debug-uel', async (req, res) => {
-  try {
-    const { fetchHTML } = await import('../scrapers/http.js');
-    const html = await fetchHTML('https://lineups.besoccer.com/en/competition/europa_league/');
-    // Estrai solo le opzioni del select e le card partita
-    const optMatches = [...html.matchAll(/option[^>]*value="([^"]*)"[^>]*>([^<]*)/g)]
-      .map(m => ({ value: m[1], label: m[2].trim() }))
-      .filter(o => o.value.includes('europa') || o.value.includes('round') || o.value.includes('match'));
-    const hasCards  = html.includes('class="card"') || html.includes('card-header');
-    const snippet   = html.slice(0, 500);
-    res.json({ optMatches, hasCards, htmlLength: html.length, snippet });
-  } catch(err) {
-    res.status(500).json({ error: err.message });
+  const { fetchHTML } = await import('../scrapers/http.js');
+  const results = {};
+
+  const sources = {
+    soccerway:   'https://int.soccerway.com/national/europe/uefa-europa-league/20242025/knockout-stage/r77735/',
+    flashscore:  'https://www.flashscore.com/football/europe/europa-league/fixtures/',
+    sofascore:   'https://www.sofascore.com/tournament/football/europe/uefa-europa-league/679',
+    resultsdb:   'https://www.resultados-futbol.com/europa-league',
+  };
+
+  for (const [name, url] of Object.entries(sources)) {
+    try {
+      const html = await fetchHTML(url, { retries: 1 });
+      results[name] = {
+        ok: true,
+        length: html.length,
+        hasMatches: html.includes('match') || html.includes('fixture') || html.includes('partita'),
+        snippet: html.slice(0, 300).replace(/\s+/g,' '),
+      };
+    } catch(err) {
+      results[name] = { ok: false, error: err.message };
+    }
   }
+  res.json(results);
 });
 
 export default router;
