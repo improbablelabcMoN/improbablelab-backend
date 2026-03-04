@@ -4,15 +4,18 @@ import { scrapeLineups as fantacalcio } from './fantacalcio.js';
 import { scrapeLineups as fplitalia }   from './fplitalia.js';
 import { scrapeLineups as besoccer }    from './besoccer.js';
 import { scrapeLineups as fantagazzetta } from './fantagazzetta.js';
+import { scrapeLineups as apifootball } from './apifootball.js';
 
 const SCRAPERS = {
   serie_a:         [
+    { name: 'apifootball', fn: () => apifootball('serie_a') },
     { name: 'sosfanta',    fn: sosfanta },
     { name: 'fantacalcio', fn: fantacalcio },
     { name: 'besoccer',    fn: () => besoccer('serie_a') },
     { name: 'fantagazzetta', fn: fantagazzetta },
   ],
   premier_league:  [
+    { name: 'apifootball', fn: () => apifootball('premier_league') },
     { name: 'fplitalia', fn: fplitalia },
     { name: 'besoccer',  fn: () => besoccer('premier_league') },
   ],
@@ -299,6 +302,7 @@ function sourceName(id) {
     fplitalia:   'FPL Italia',
     besoccer:    'BeSoccer',
     fantagazzetta: 'Fantagazzetta',
+    apifootball:   'API-Football',
     tmw:           'TuttoMercatoWeb',
   }[id] || id;
 }
