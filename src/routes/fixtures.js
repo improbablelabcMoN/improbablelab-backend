@@ -117,9 +117,20 @@ function normalizeStatus(apiStatus) {
 
 // ── Trasforma fixture API → formato frontend ──────────────────────────────
 function transformFixture(f) {
-  const dt      = new Date(f.fixture.date);
-  const date    = dt.toISOString().slice(0, 10);
-  const time    = `${String(dt.getUTCHours()).padStart(2,'0')}:${String(dt.getUTCMinutes()).padStart(2,'0')}`;
+  // API-Football returns ISO with timezone offset e.g. "2026-03-08T20:45:00+01:00"
+  // Estraiamo data e ora LOCALI dalla stringa ISO direttamente (non convertiamo in UTC)
+  // così evitiamo problemi di timezone nel frontend
+  const rawDate = f.fixture.date || '';
+  let date = rawDate.slice(0, 10);
+  let time = '00:00';
+  const timePart = rawDate.match(/T(\d{2}:\d{2})/);
+  if (timePart) time = timePart[1];
+  // Fallback: se non c'è timezone info usiamo UTC
+  if (!rawDate.includes('+') && !rawDate.includes('Z') === false) {
+    const dt = new Date(rawDate);
+    date = dt.toISOString().slice(0, 10);
+    time = `${String(dt.getUTCHours()).padStart(2,'0')}:${String(dt.getUTCMinutes()).padStart(2,'0')}`;
+  }
   const status  = normalizeStatus(f.fixture.status);
   const elapsed = f.fixture.status.elapsed || null;
 
