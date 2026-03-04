@@ -1,7 +1,10 @@
 /**
- * /api/analysis  — AI-powered match analysis
- * Uses Claude claude-sonnet-4-20250514 + web_search
- * Cache: 30 min in-memory Map (no external dependencies)
+ * /api/analysis — AI-powered match analysis con polling asincrono
+ * 
+ * GET /api/analysis?home=X&away=Y&league=Z&date=D  
+ *   → 202 { status: "pending", jobId } se in elaborazione
+ *   → 200 { status: "done", analysis } se pronta (cache)
+ *   → 500 { status: "error", error } se fallita
  */
 
 import { Router } from 'express';
@@ -13,18 +16,20 @@ const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-sonnet-4-20250514';
 const CACHE_TTL_MS = (Number(process.env.CACHE_TTL_ANALYSIS) || 1800) * 1000;
 
-// Simple in-memory cache: key → { data, expiresAt }
-const cache = new Map();
+// Cache risultati completati: key → { data, expiresAt }
+const doneCache = new Map();
+// Job in corso: key → "pending" | "error:msg"
+const jobStatus = new Map();
 
 function cacheGet(key) {
-  const entry = cache.get(key);
+  const entry = doneCache.get(key);
   if (!entry) return null;
-  if (Date.now() > entry.expiresAt) { cache.delete(key); return null; }
+  if (Date.now() > entry.expiresAt) { doneCache.delete(key); return null; }
   return entry.data;
 }
 
 function cacheSet(key, data) {
-  cache.set(key, { data, expiresAt: Date.now() + CACHE_TTL_MS });
+  doneCache.set(key, { data, expiresAt: Date.now() + CACHE_TTL_MS });
 }
 
 async function generateAnalysis({ home, away, league, date, time }) {
@@ -64,7 +69,7 @@ Cerca informazioni aggiornate su questa partita e restituisci SOLO un oggetto JS
   "generated_at": "${new Date().toISOString()}"
 }
 
-Sii preciso, usa dati reali cercati sul web. Per le percentuali forecast assicurati che sommino a 100.`;
+Sii preciso, usa dati reali cercati sul web. Le percentuali forecast devono sommare a 100.`;
 
   const response = await fetch(ANTHROPIC_API, {
     method: 'POST',
@@ -87,12 +92,10 @@ Sii preciso, usa dati reali cercati sul web. Per le percentuali forecast assicur
   }
 
   const data = await response.json();
-
   const textBlock = data.content?.find(b => b.type === 'text');
   if (!textBlock?.text) throw new Error('No text response from Claude');
 
   const raw = textBlock.text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-
   const start = raw.indexOf('{');
   const end = raw.lastIndexOf('}');
   if (start === -1 || end === -1) throw new Error('No JSON found in Claude response');
@@ -100,7 +103,27 @@ Sii preciso, usa dati reali cercati sul web. Per le percentuali forecast assicur
   return JSON.parse(raw.slice(start, end + 1));
 }
 
-router.get('/', async (req, res) => {
+function startJob(cacheKey, params) {
+  if (jobStatus.get(cacheKey) === 'pending') return; // già in corso
+  jobStatus.set(cacheKey, 'pending');
+  logger.info(`CACHE MISS [analysis] ${cacheKey} — fetching from Claude...`);
+
+  generateAnalysis(params)
+    .then(analysis => {
+      cacheSet(cacheKey, analysis);
+      jobStatus.delete(cacheKey);
+      logger.info(`CACHE SET [analysis] ${cacheKey}`);
+    })
+    .catch(err => {
+      jobStatus.set(cacheKey, `error:${err.message}`);
+      logger.error(`Analysis error [${cacheKey}]: ${err.message}`);
+      // Pulisci l'errore dopo 30s così si può riprovare
+      setTimeout(() => jobStatus.delete(cacheKey), 30000);
+    });
+}
+
+// GET /api/analysis?home=Roma&away=Milan&league=Serie+A&date=2026-03-01&time=20:45
+router.get('/', (req, res) => {
   const { home, away, league, date, time } = req.query;
 
   if (!home || !away || !league || !date) {
@@ -109,22 +132,22 @@ router.get('/', async (req, res) => {
 
   const cacheKey = `${league}__${home}__${away}__${date}`.toLowerCase().replace(/\s+/g, '_');
 
+  // 1. Risultato già in cache → restituisci subito
   const cached = cacheGet(cacheKey);
   if (cached) {
     logger.info(`CACHE HIT [analysis] ${cacheKey}`);
-    return res.json({ ok: true, analysis: cached });
+    return res.json({ ok: true, status: 'done', analysis: cached });
   }
 
-  logger.info(`CACHE MISS [analysis] ${cacheKey} — fetching from Claude...`);
-
-  try {
-    const analysis = await generateAnalysis({ home, away, league, date, time });
-    cacheSet(cacheKey, analysis);
-    res.json({ ok: true, analysis });
-  } catch (err) {
-    logger.error(`Analysis error [${cacheKey}]: ${err.message}`);
-    res.status(500).json({ ok: false, error: err.message });
+  // 2. Job in errore
+  const status = jobStatus.get(cacheKey);
+  if (status?.startsWith('error:')) {
+    return res.status(500).json({ ok: false, status: 'error', error: status.slice(6) });
   }
+
+  // 3. Avvia job in background (se non già in corso) e rispondi 202
+  startJob(cacheKey, { home, away, league, date, time });
+  return res.status(202).json({ ok: true, status: 'pending', jobId: cacheKey });
 });
 
 export default router;
