@@ -148,9 +148,9 @@ function mergeSourceIntoMatch(match, item, sourceid) {
 
     // Aggiungi giocatori away
     if (ad) {
-      const awayPlayers = ad.players || (ad.lineup || []).flat().map(p => ({
-        name: p.n, role: p.pos, num: p.num, prob: p.p
-      }));
+      const awayPlayers = (ad.players?.length ? ad.players : (ad.lineup || []).flat()).map(p => ({
+        name: p.name || p.n || '', role: p.pos || p.role || 'N/D', num: p.num || 0, prob: p.p || p.prob || 80
+      })).filter(p => p.name);
       mergePlayers(match.awayData._playerMap, awayPlayers, sourceid);
       match.awayData.sources.push({
         id: sourceid, name: sourceName(sourceid),
@@ -204,7 +204,8 @@ function mergeSourceIntoMatch(match, item, sourceid) {
 // la probabilità cresce col numero di fonti che lo confermano
 function mergePlayers(playerMap, players, sourceid) {
   for (const p of players) {
-    const name = normalizePlayerName(p.name || p);
+    const rawName = (typeof p === 'object') ? (p.name || p.n || '') : p;
+    const name = normalizePlayerName(rawName);
     if (!name || name.length < 2) continue;
 
     if (!playerMap.has(name)) {
@@ -322,6 +323,7 @@ function toTokens(players) {
 // Es: "Pellegrini L." === "Lorenzo Pellegrini" === "pellegrini"
 function normalizePlayerName(name) {
   if (!name) return '';
+  if (typeof name === 'object') name = name.n || name.name || '';
   return name
     .toLowerCase()
     .replace(/[^a-zàèéìòùáéíóú]/gi, ' ')
