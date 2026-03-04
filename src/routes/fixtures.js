@@ -331,27 +331,29 @@ router.get('/debug', async (req, res) => {
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
-// ── Debug UEL: prova più sorgenti ───────────────────────────────────────
+// ── Debug UEL: Google Calendar API (pubblico, no auth) ──────────────────
 router.get('/debug-uel', async (req, res) => {
+  // Google Calendar IDs ufficiali UEFA — pubblici, no API key necessaria
+  // Formato: https://www.googleapis.com/calendar/v3/calendars/{ID}/events?key={PUBLIC_KEY}
+  // Oppure feed pubblico JSON diretto
   const { fetchHTML } = await import('../scrapers/http.js');
   const results = {};
 
   const sources = {
-    soccerway:   'https://int.soccerway.com/national/europe/uefa-europa-league/20242025/knockout-stage/r77735/',
-    flashscore:  'https://www.flashscore.com/football/europe/europa-league/fixtures/',
-    sofascore:   'https://www.sofascore.com/tournament/football/europe/uefa-europa-league/679',
-    resultsdb:   'https://www.resultados-futbol.com/europa-league',
+    // Google Calendar public JSON feed (no auth needed for public calendars)
+    google_uel: 'https://calendar.google.com/calendar/feeds/en.uel%23sport%40group.v.calendar.google.com/public/basic?alt=json&max-results=20',
+    google_uel2: 'https://www.googleapis.com/calendar/v3/calendars/en.uel%23sport%40group.v.calendar.google.com/events?maxResults=20&singleEvents=true&orderBy=startTime&timeMin=' + new Date().toISOString(),
+    // OpenLigaDB — free, no auth
+    openliga: 'https://api.openligadb.de/getmatchdata/ucl/2024',
+    // TheSportsDB free
+    sportsdb: 'https://www.thesportsdb.com/api/v1/json/3/eventsseason.php?id=4480&s=2024-2025',
   };
 
   for (const [name, url] of Object.entries(sources)) {
     try {
-      const html = await fetchHTML(url, { retries: 1 });
-      results[name] = {
-        ok: true,
-        length: html.length,
-        hasMatches: html.includes('match') || html.includes('fixture') || html.includes('partita'),
-        snippet: html.slice(0, 300).replace(/\s+/g,' '),
-      };
+      const text = await fetchHTML(url, { retries: 1 });
+      const snippet = (typeof text === 'string' ? text : JSON.stringify(text)).slice(0, 400).replace(/\s+/g,' ');
+      results[name] = { ok: true, length: text.length, snippet };
     } catch(err) {
       results[name] = { ok: false, error: err.message };
     }
