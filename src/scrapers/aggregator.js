@@ -3,12 +3,14 @@ import { scrapeLineups as sosfanta }    from './sosfanta.js';
 import { scrapeLineups as fantacalcio } from './fantacalcio.js';
 import { scrapeLineups as fplitalia }   from './fplitalia.js';
 import { scrapeLineups as besoccer }    from './besoccer.js';
+import { scrapeLineups as fantagazzetta } from './fantagazzetta.js';
 
 const SCRAPERS = {
   serie_a:         [
     { name: 'sosfanta',    fn: sosfanta },
     { name: 'fantacalcio', fn: fantacalcio },
     { name: 'besoccer',    fn: () => besoccer('serie_a') },
+    { name: 'fantagazzetta', fn: fantagazzetta },
   ],
   premier_league:  [
     { name: 'fplitalia', fn: fplitalia },
@@ -61,7 +63,7 @@ function mergeMatches(results, league) {
     if (!r.ok || !r.data?.length) continue;
 
     for (const item of r.data) {
-      const key = normalizeKey(item.homeTeam || item.home, item.awayTeam || item.away);
+      const key = normalizeKey(item.homeTeam, item.awayTeam);
       if (!key) continue;
 
       if (!map.has(key)) {
@@ -78,10 +80,10 @@ function mergeMatches(results, league) {
 // ── Crea struttura match vuota ─────────────────────────────────────────────
 function initMatch(item, league) {
   return {
-    id:      `${league}_${normalizeKey(item.homeTeam || item.home, item.awayTeam || item.away)}`,
+    id:      `${league}_${normalizeKey(item.homeTeam, item.awayTeam)}`,
     league,
-    home: item.homeTeam || item.home,
-    away: item.awayTeam || item.away,
+    home:    item.homeTeam,
+    away:    item.awayTeam,
     date:    item.date    || '',
     time:    item.time    || '',
     staticStatus: 'scheduled',
@@ -111,8 +113,8 @@ function initMatch(item, league) {
 
 // ── Aggiunge una fonte al match ───────────────────────────────────────────
 function mergeSourceIntoMatch(match, item, sourceid) {
-  const homePlayers = item.homePlayers || item.homeData?.players || item.starters || [];
-  const awayPlayers = item.awayPlayers || item.awayData?.players || [];
+  const homePlayers = item.homePlayers || item.starters || [];
+  const awayPlayers = item.awayPlayers || [];
 
   // ── Home ──
   mergePlayers(match.homeData._playerMap, homePlayers, sourceid);
@@ -296,5 +298,7 @@ function sourceName(id) {
     fantacalcio: 'Fantacalcio.it',
     fplitalia:   'FPL Italia',
     besoccer:    'BeSoccer',
+    fantagazzetta: 'Fantagazzetta',
+    tmw:           'TuttoMercatoWeb',
   }[id] || id;
 }
