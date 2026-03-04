@@ -1,4 +1,4 @@
-import * as cheerio from 'cheerio';
+  import * as cheerio from 'cheerio';
 import { fetchHTML } from './http.js';
 import { logger } from '../index.js';
 
@@ -11,6 +11,7 @@ export const LEAGUE_SLUGS = {
   bundesliga:       'bundesliga',
   ligue_1:          'ligue_1',
   champions_league: 'champions_league',
+  europa_league:    'europa_league',
 };
 
 function parseDateTime(dateStr, hourStr) {
