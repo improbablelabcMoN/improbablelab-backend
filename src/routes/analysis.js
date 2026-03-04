@@ -1,39 +1,30 @@
 /**
  * /api/analysis  — AI-powered match analysis
- * Uses Claude claude-sonnet-4-20250514 + web_search to generate:
- *   - Stadium & crowd info
- *   - Probable lineups with reasoning
- *   - Tactical analysis
- *   - Injuries & recent news
- *   - Win probability forecast
- *
- * Cache: 30 minutes per match (home+away+date key)
+ * Uses Claude claude-sonnet-4-20250514 + web_search
+ * Cache: 30 min in-memory Map (no external dependencies)
  */
 
 import { Router } from 'express';
-import { cached } from '../cache/manager.js';
 import { logger } from '../index.js';
 
 const router = Router();
 
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-sonnet-4-20250514';
-const CACHE_TTL_ANALYSIS = Number(process.env.CACHE_TTL_ANALYSIS) || 1800; // 30 min
+const CACHE_TTL_MS = (Number(process.env.CACHE_TTL_ANALYSIS) || 1800) * 1000;
 
-// Extend cache manager to support 'analysis' type dynamically
-import NodeCache from 'node-cache';
-const analysisCache = new NodeCache({ stdTTL: CACHE_TTL_ANALYSIS });
+// Simple in-memory cache: key → { data, expiresAt }
+const cache = new Map();
 
-async function cachedAnalysis(key, fetcher) {
-  const hit = analysisCache.get(key);
-  if (hit !== undefined) {
-    logger.info(`CACHE HIT [analysis] ${key}`);
-    return hit;
-  }
-  logger.info(`CACHE MISS [analysis] ${key} — fetching from Claude...`);
-  const data = await fetcher();
-  analysisCache.set(key, data);
-  return data;
+function cacheGet(key) {
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) { cache.delete(key); return null; }
+  return entry.data;
+}
+
+function cacheSet(key, data) {
+  cache.set(key, { data, expiresAt: Date.now() + CACHE_TTL_MS });
 }
 
 async function generateAnalysis({ home, away, league, date, time }) {
@@ -97,14 +88,11 @@ Sii preciso, usa dati reali cercati sul web. Per le percentuali forecast assicur
 
   const data = await response.json();
 
-  // Extract text from content blocks (may contain tool_use + text blocks)
   const textBlock = data.content?.find(b => b.type === 'text');
   if (!textBlock?.text) throw new Error('No text response from Claude');
 
-  // Strip markdown fences if present
   const raw = textBlock.text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
 
-  // Find JSON object boundaries robustly
   const start = raw.indexOf('{');
   const end = raw.lastIndexOf('}');
   if (start === -1 || end === -1) throw new Error('No JSON found in Claude response');
@@ -112,7 +100,6 @@ Sii preciso, usa dati reali cercati sul web. Per le percentuali forecast assicur
   return JSON.parse(raw.slice(start, end + 1));
 }
 
-// GET /api/analysis?home=Roma&away=Milan&league=Serie+A&date=2026-03-01&time=20:45
 router.get('/', async (req, res) => {
   const { home, away, league, date, time } = req.query;
 
@@ -122,10 +109,17 @@ router.get('/', async (req, res) => {
 
   const cacheKey = `${league}__${home}__${away}__${date}`.toLowerCase().replace(/\s+/g, '_');
 
+  const cached = cacheGet(cacheKey);
+  if (cached) {
+    logger.info(`CACHE HIT [analysis] ${cacheKey}`);
+    return res.json({ ok: true, analysis: cached });
+  }
+
+  logger.info(`CACHE MISS [analysis] ${cacheKey} — fetching from Claude...`);
+
   try {
-    const analysis = await cachedAnalysis(cacheKey, () =>
-      generateAnalysis({ home, away, league, date, time })
-    );
+    const analysis = await generateAnalysis({ home, away, league, date, time });
+    cacheSet(cacheKey, analysis);
     res.json({ ok: true, analysis });
   } catch (err) {
     logger.error(`Analysis error [${cacheKey}]: ${err.message}`);
