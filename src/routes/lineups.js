@@ -25,6 +25,7 @@ router.get('/sources', (req, res) => res.json({ sources: [
   { id:'fplitalia',    name:'FPL Italia',        league:'premier_league', url:'https://fplitalia.com' },
   { id:'besoccer',     name:'BeSoccer',          league:'multi',          url:'https://lineups.besoccer.com' },
   { id:'fantagazzetta', name:'Fantagazzetta',      league:'serie_a',        url:'https://www.fantagazzetta.com' },
+  { id:'apifootball',   name:'API-Football',       league:'multi',          url:'https://api-sports.io' },
 ]}));
 
 export default router;
