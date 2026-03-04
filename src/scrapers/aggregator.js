@@ -211,7 +211,7 @@ function mergePlayers(playerMap, players, sourceid) {
     if (!playerMap.has(name)) {
       playerMap.set(name, {
         name,
-        originalName: p.name || p,
+        originalName: (typeof p === 'object') ? (p.name || p.n || '') : (p || ''),
         role:     p.role || 'N/D',
         num:      p.num  || 0,
         sources:  [],    // quali fonti lo includono
@@ -271,7 +271,7 @@ function processTeamData(teamData) {
   // Converti in formato lineup per il frontend
   teamData.lineup  = buildLineupRows(starters);
   teamData.players = starters.map(p => ({
-    n:   p.originalName,
+    n:   String(p.originalName || ''),
     pos: p.role,
     num: p.num || 0,
     p:   p.prob,
@@ -311,7 +311,7 @@ function buildLineupRows(players) {
 
 function toTokens(players) {
   return players.map(p => ({
-    n:     p.originalName,
+    n:     String(p.originalName || ''),
     num:   p.num || 0,
     p:     p.prob,
     pos:   p.role,
