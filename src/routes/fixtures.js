@@ -331,4 +331,21 @@ router.get('/debug', async (req, res) => {
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Debug UEL: mostra HTML grezzo BeSoccer ──────────────────────────────
+router.get('/debug-uel', async (req, res) => {
+  try {
+    const { fetchHTML } = await import('../scrapers/http.js');
+    const html = await fetchHTML('https://lineups.besoccer.com/en/competition/europa_league/');
+    // Estrai solo le opzioni del select e le card partita
+    const optMatches = [...html.matchAll(/option[^>]*value="([^"]*)"[^>]*>([^<]*)/g)]
+      .map(m => ({ value: m[1], label: m[2].trim() }))
+      .filter(o => o.value.includes('europa') || o.value.includes('round') || o.value.includes('match'));
+    const hasCards  = html.includes('class="card"') || html.includes('card-header');
+    const snippet   = html.slice(0, 500);
+    res.json({ optMatches, hasCards, htmlLength: html.length, snippet });
+  } catch(err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;
