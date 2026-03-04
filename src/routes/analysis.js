@@ -1,10 +1,7 @@
 /**
- * /api/analysis — AI-powered match analysis con polling asincrono
- * 
- * GET /api/analysis?home=X&away=Y&league=Z&date=D  
- *   → 202 { status: "pending", jobId } se in elaborazione
- *   → 200 { status: "done", analysis } se pronta (cache)
- *   → 500 { status: "error", error } se fallita
+ * /api/analysis — AI-powered match analysis
+ * Uses Gemini 2.0 Flash + Google Search grounding (gratuito)
+ * Cache: 30 min in-memory Map
  */
 
 import { Router } from 'express';
@@ -12,13 +9,11 @@ import { logger } from '../index.js';
 
 const router = Router();
 
-const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
-const MODEL = 'claude-sonnet-4-20250514';
+const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 const CACHE_TTL_MS = (Number(process.env.CACHE_TTL_ANALYSIS) || 1800) * 1000;
 
-// Cache risultati completati: key → { data, expiresAt }
+// Simple in-memory cache
 const doneCache = new Map();
-// Job in corso: key → "pending" | "error:msg"
 const jobStatus = new Map();
 
 function cacheGet(key) {
@@ -33,8 +28,8 @@ function cacheSet(key, data) {
 }
 
 async function generateAnalysis({ home, away, league, date, time }) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set in environment');
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GEMINI_API_KEY not set in environment');
 
   const prompt = `Sei un analista calcistico esperto. Analizza la partita: ${home} vs ${away} — ${league}, ${date} ore ${time || 'TBD'}.
 
@@ -49,7 +44,7 @@ Cerca informazioni aggiornate su questa partita e restituisci SOLO un oggetto JS
     "note": "breve nota atmosfera/tifoseria"
   },
   "news": [
-    { "type": "injury|suspension|form|transfer|other", "team": "nome squadra", "player": "nome giocatore o null", "text": "testo notizia breve", "impact": "high|medium|low" }
+    { "type": "injury", "team": "nome squadra", "player": "nome giocatore o null", "text": "testo notizia breve", "impact": "high|medium|low" }
   ],
   "lineup_reasoning": {
     "home": "2-3 frasi sul probabile modulo e scelte tattiche della squadra di casa",
@@ -71,67 +66,62 @@ Cerca informazioni aggiornate su questa partita e restituisci SOLO un oggetto JS
 
 Sii preciso, usa dati reali cercati sul web. Le percentuali forecast devono sommare a 100.`;
 
-  let response = await fetch(ANTHROPIC_API, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
+  const body = {
+    contents: [{ parts: [{ text: prompt }] }],
+    tools: [{ google_search: {} }],
+    generationConfig: {
+      temperature: 0.2,
+      maxOutputTokens: 1500,
     },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: 1500,
-      tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-      messages: [{ role: 'user', content: prompt }],
-    }),
+  };
+
+  const response = await fetch(`${GEMINI_API}?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
     const errText = await response.text();
-    // Rate limit (529 o 429) → aspetta 35s e riprova una volta
-    if (response.status === 429 || response.status === 529) {
-      logger.warn(`Rate limit hit — waiting 35s before retry...`);
-      await new Promise(r => setTimeout(r, 35000));
-      const retry = await fetch(ANTHROPIC_API, {
+    // Rate limit → aspetta 30s e riprova
+    if (response.status === 429) {
+      logger.warn(`Gemini rate limit — waiting 30s before retry...`);
+      await new Promise(r => setTimeout(r, 30000));
+      const retry = await fetch(`${GEMINI_API}?key=${apiKey}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: MODEL,
-          max_tokens: 1500,
-          tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-          messages: [{ role: 'user', content: prompt }],
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
       });
       if (!retry.ok) {
         const retryErr = await retry.text();
-        throw new Error(`Anthropic API error ${retry.status}: ${retryErr}`);
+        throw new Error(`Gemini API error ${retry.status}: ${retryErr}`);
       }
-      response = retry; // usa la risposta del retry
-    } else {
-      throw new Error(`Anthropic API error ${response.status}: ${errText}`);
+      const retryData = await retry.json();
+      return parseGeminiResponse(retryData);
     }
+    throw new Error(`Gemini API error ${response.status}: ${errText}`);
   }
 
   const data = await response.json();
-  const textBlock = data.content?.find(b => b.type === 'text');
-  if (!textBlock?.text) throw new Error('No text response from Claude');
+  return parseGeminiResponse(data);
+}
 
-  const raw = textBlock.text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+function parseGeminiResponse(data) {
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('No text response from Gemini');
+
+  const raw = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
   const start = raw.indexOf('{');
   const end = raw.lastIndexOf('}');
-  if (start === -1 || end === -1) throw new Error('No JSON found in Claude response');
+  if (start === -1 || end === -1) throw new Error('No JSON found in Gemini response');
 
   return JSON.parse(raw.slice(start, end + 1));
 }
 
 function startJob(cacheKey, params) {
-  if (jobStatus.get(cacheKey) === 'pending') return; // già in corso
+  if (jobStatus.get(cacheKey) === 'pending') return;
   jobStatus.set(cacheKey, 'pending');
-  logger.info(`CACHE MISS [analysis] ${cacheKey} — fetching from Claude...`);
+  logger.info(`CACHE MISS [analysis] ${cacheKey} — fetching from Gemini...`);
 
   generateAnalysis(params)
     .then(analysis => {
@@ -142,7 +132,6 @@ function startJob(cacheKey, params) {
     .catch(err => {
       jobStatus.set(cacheKey, `error:${err.message}`);
       logger.error(`Analysis error [${cacheKey}]: ${err.message}`);
-      // Pulisci l'errore dopo 30s così si può riprovare
       setTimeout(() => jobStatus.delete(cacheKey), 30000);
     });
 }
@@ -157,20 +146,17 @@ router.get('/', (req, res) => {
 
   const cacheKey = `${league}__${home}__${away}__${date}`.toLowerCase().replace(/\s+/g, '_');
 
-  // 1. Risultato già in cache → restituisci subito
   const cached = cacheGet(cacheKey);
   if (cached) {
     logger.info(`CACHE HIT [analysis] ${cacheKey}`);
     return res.json({ ok: true, status: 'done', analysis: cached });
   }
 
-  // 2. Job in errore
   const status = jobStatus.get(cacheKey);
   if (status?.startsWith('error:')) {
     return res.status(500).json({ ok: false, status: 'error', error: status.slice(6) });
   }
 
-  // 3. Avvia job in background (se non già in corso) e rispondi 202
   startJob(cacheKey, { home, away, league, date, time });
   return res.status(202).json({ ok: true, status: 'pending', jobId: cacheKey });
 });
