@@ -31,58 +31,46 @@ async function generateAnalysis({ home, away, league, date, time }) {
   const apiKey = process.env.PERPLEXITY_API_KEY;
   if (!apiKey) throw new Error('PERPLEXITY_API_KEY not set in environment');
 
-  const systemPrompt = `Sei un analista calcistico esperto con accesso alle notizie più recenti. Il tuo compito principale è trovare TUTTI gli infortuni, squalifiche e assenze certe o probabili per la partita richiesta. Rispondi SOLO con un oggetto JSON valido, senza testo prima o dopo, senza markdown, senza backtick.`;
+  const systemPrompt = `Sei un analista calcistico esperto. Rispondi SOLO con un oggetto JSON valido, senza testo prima o dopo, senza markdown, senza backtick. Non includere mai notizie generiche o ovvie — solo fatti concreti, specifici e verificabili.`;
 
-  const userPrompt = `Analizza la partita: ${home} vs ${away} (${league}), ${date} ore ${time || 'TBD'}.
+  const userPrompt = `Analizza la partita: ${home} vs ${away} — ${league}, ${date} ore ${time || 'TBD'}.
 
-PRIORITA ASSOLUTA - cerca notizie di OGGI e degli ultimi 2 giorni su:
-1. Infortuni confermati o sospetti (chi si e allenato, chi no, chi e in dubbio)
-2. Squalifiche (diffide, espulsioni nelle partite precedenti)
-3. Giocatori rientrati da infortuni (potrebbero non essere al 100%)
-4. Dichiarazioni dell'allenatore in conferenza stampa
-5. Solo dopo: notizie di forma generale, mercato, precedenti
+Cerca informazioni REALI e SPECIFICHE degli ultimi 7 giorni. 
 
-Per ogni giocatore assente o in dubbio, specifica se e CERTO (confirmed_out) o DUBBIO (doubt).
+Per il campo "news", inserisci SOLO notizie concrete:
+- Infortuni e assenze CONFERMATE con nome giocatore specifico
+- Squalifiche (chi ha preso il cartellino rosso o ha raggiunto la diffida)  
+- Rientri da infortunio (chi torna disponibile)
+- Dichiarazioni dell'allenatore in conferenza stampa su formazione/assenti
+- Forma recente (ultime 3-5 partite) SOLO se rilevante per le scelte
 
-Restituisci SOLO questo JSON:
+NON inserire nelle news: frasi generiche tipo "partita importante", "sfida attesa", 
+"match di cartello", orari della partita, o informazioni ovvie. 
+Ogni news deve citare un fatto specifico con nome, data o fonte.
+
+Restituisci SOLO questo JSON (struttura identica):
 
 {
   "stadium": {
     "name": "nome stadio",
-    "city": "citta",
+    "city": "città",
     "capacity": 12345,
     "surface": "erba naturale",
-    "note": "breve nota atmosfera"
+    "note": "breve nota atmosfera/tifoseria"
   },
   "news": [
-    {
-      "type": "injury|suspension|doubt|return|form|tactical|transfer|other",
-      "team": "nome squadra",
-      "player": "nome giocatore o null",
-      "status": "confirmed_out|doubt|returning|available|suspended",
-      "text": "notizia precisa, cita la fonte se possibile",
-      "impact": "high|medium|low",
-      "source_hint": "es: conferenza stampa 05/03, Sky Sport, Gazzetta"
-    }
+    { "type": "injury|suspension|form|transfer|other", "team": "nome squadra", "player": "nome giocatore o null", "text": "fatto specifico con dettaglio concreto, es: out per lesione muscolare dal 28/02", "impact": "high|medium|low" }
   ],
-  "absences_summary": {
-    "${home}": ["lista nomi giocatori CERTI assenti"],
-    "${away}": ["lista nomi giocatori CERTI assenti"]
-  },
-  "doubts_summary": {
-    "${home}": ["lista nomi giocatori IN DUBBIO"],
-    "${away}": ["lista nomi giocatori IN DUBBIO"]
-  },
   "lineup_reasoning": {
-    "home": "2-3 frasi sul probabile modulo tenendo conto degli infortuni e dichiarazioni",
-    "away": "2-3 frasi sul probabile modulo tenendo conto degli infortuni e dichiarazioni"
+    "home": "2-3 frasi sul probabile modulo e scelte tattiche della squadra di casa basate su dati recenti",
+    "away": "2-3 frasi sul probabile modulo e scelte tattiche della squadra ospite basate su dati recenti"
   },
-  "tactical_analysis": "3-4 frasi: punti di forza, debolezze, matchup chiave",
+  "tactical_analysis": "3-4 frasi sull'analisi tattica: punti di forza, debolezze, matchup chiave",
   "forecast": {
     "home_win": 45,
     "draw": 28,
     "away_win": 27,
-    "reasoning": "1-2 frasi pronostico considerando gli assenti e la forma recente",
+    "reasoning": "1-2 frasi che spiegano il pronostico basato su forma recente e statistiche",
     "key_factor": "il fattore decisivo della partita in una frase"
   },
   "last_meetings": [
@@ -91,7 +79,8 @@ Restituisci SOLO questo JSON:
   "generated_at": "${new Date().toISOString()}"
 }
 
-Ordina le news per impatto (high prima, poi medium, poi low). Le news su infortuni e squalifiche vengono prima di tutto. Le percentuali forecast devono sommare a 100 esatti.`;
+Ordina le news per impatto: prima injury e suspension (high), poi form e transfer (medium/low).
+Le percentuali forecast devono sommare esattamente a 100.`;
 
   const response = await fetch(PERPLEXITY_API, {
     method: 'POST',
@@ -105,7 +94,7 @@ Ordina le news per impatto (high prima, poi medium, poi low). Le news su infortu
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
-      max_tokens: 1500,
+      max_tokens: 1800,
       temperature: 0.2,
       search_recency_filter: 'day',
       return_citations: false,
@@ -129,10 +118,10 @@ Ordina le news per impatto (high prima, poi medium, poi low). Le news su infortu
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt },
           ],
-          max_tokens: 2000,
-          temperature: 0.1,
+          max_tokens: 1800,
+          temperature: 0.2,
           search_recency_filter: 'day',
-          return_citations: true,
+          return_citations: false,
         }),
       });
       if (!retry.ok) {
