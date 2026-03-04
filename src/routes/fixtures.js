@@ -24,18 +24,12 @@ const FDO_LEAGUES = {
   bundesliga:       'BL1',
   ligue_1:          'FL1',
   champions_league: 'CL',
-  // europa_league non disponibile nel piano free → usa ICS
+  europa_league:    'EL',   // richiede tier 1 — gestito con fallback graceful
 };
 
-// ICS pubblici per campionati non coperti dalle API
-// Lista ordinata per affidabilità — prova il primo, fallback sul secondo
-const ICS_LEAGUES = {
-  europa_league: [
-    'https://www.scorespro.com/ics/soccer/europa-league.ics',
-    'https://ics.fixtur.es/v2/uefa-europa-league.ics',
-    'https://www.stanza.co/api/feeds/soccer_uel/ics/soccer_uel.ics',
-  ],
-};
+// Campionati senza API dedicata — usano solo dati lineups da BeSoccer
+// (nessuna chiamata fixtures separata necessaria)
+const ICS_LEAGUES = {};  // riservato per future integrazioni
 
 // ── Cache ─────────────────────────────────────────────────────────────────
 const cache = new Map();
@@ -148,8 +142,21 @@ async function fetchFromFdo(league, apiKey) {
   const to   = new Date(Date.now() + 30*86400000).toISOString().slice(0,10);
   const url  = `${FDO_BASE}/competitions/${code}/matches?dateFrom=${from}&dateTo=${to}`;
   logger.info(`[Fixtures/FDO] ${url}`);
-  const d = await fetchJSON(url, { headers: { 'X-Auth-Token': apiKey } });
-  return (d.matches || []).map(fdoTransform);
+  try {
+    const d = await fetchJSON(url, { headers: { 'X-Auth-Token': apiKey } });
+    if (d.errorCode === 403 || d.message?.includes('not available')) {
+      logger.warn(`[Fixtures/FDO] ${league} (${code}): non disponibile nel piano attuale`);
+      return [];
+    }
+    return (d.matches || []).map(fdoTransform);
+  } catch (err) {
+    // 403 = piano non include questa competizione → restituisci vuoto, non errore
+    if (err.message?.includes('403') || err.response?.status === 403) {
+      logger.warn(`[Fixtures/FDO] ${league}: 403 — competizione non nel piano, skip fixtures`);
+      return [];
+    }
+    throw err;
+  }
 }
 
 // ════════════════════════════════════════════
@@ -252,8 +259,7 @@ router.get('/', async (req, res) => {
   const { league = 'serie_a' } = req.query;
   const useApf = !!APF_LEAGUES[league];
   const useFdo = !!FDO_LEAGUES[league];
-  const useIcs = !!ICS_LEAGUES[league];
-  if (!useApf && !useFdo && !useIcs)
+  if (!useApf && !useFdo)
     return res.status(400).json({ error: `League '${league}' non supportata` });
 
   const apfKey = process.env.API_FOOTBALL_KEY;
@@ -268,9 +274,7 @@ router.get('/', async (req, res) => {
   try {
     const fixtures = useApf
       ? await fetchFromApf(league, apfKey)
-      : useFdo
-        ? await fetchFromFdo(league, fdoKey)
-        : await fetchFromICS(league);
+      : await fetchFromFdo(league, fdoKey);
 
     if (!fixtures.length) {
       logger.warn(`[Fixtures] ${league}: 0 risultati`);
@@ -281,7 +285,7 @@ router.get('/', async (req, res) => {
     const soon   = Date.now() + 7*86400000;
     const resp   = {
       league,
-      source:    useApf ? 'api-football' : useFdo ? 'football-data.org' : 'ics',
+      source:    useApf ? 'api-football' : 'football-data.org',
       fetchedAt: new Date().toISOString(),
       total:     fixtures.length,
       rounds:    groupByRound(fixtures),
@@ -314,12 +318,6 @@ router.get('/debug', async (req, res) => {
       const d    = await fetchJSON(url, { headers: { 'x-apisports-key': apfKey } });
       return res.json({ source:'api-football', league, count: d.results, errors: d.errors,
         first3: (d.response||[]).slice(0,3).map(f=>({ date:f.fixture.date, home:f.teams.home.name, away:f.teams.away.name })) });
-    } else if (ICS_LEAGUES[league]) {
-      try {
-        const fxs = await fetchFromICS(league);
-        return res.json({ source:'ics', league, count: fxs.length,
-          first3: fxs.slice(0,3).map(f=>({ date:f.date, time:f.time, home:f.home.name, away:f.away.name, round:f.round })) });
-      } catch(e) { return res.status(500).json({ error: e.message }); }
     } else {
       const code = FDO_LEAGUES[league];
       if (!code) return res.status(400).json({ error: 'League non supportata' });
