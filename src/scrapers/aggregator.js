@@ -61,19 +61,17 @@ function mergeMatches(results, league) {
 
   for (const r of results) {
     if (!r.ok || !r.data?.length) {
-      logger.warn(`[Merge] Skipping ${r.name}: ok=${r.ok} data=${r.data?.length}`);
       continue;
     }
-    logger.info(`[Merge] Processing ${r.name}: ${r.data.length} items`);
-    // Debug primo item
-    if (r.data[0]) logger.info(`[Merge] First item keys: ${Object.keys(r.data[0]).join(',')}`);
+
 
     for (const item of r.data) {
+      // Normalizza i campi: BeSoccer usa home/away, altri usano homeTeam/awayTeam
+      if (!item.homeTeam && item.home) item.homeTeam = item.home;
+      if (!item.awayTeam && item.away) item.awayTeam = item.away;
+
       const key = normalizeKey(item.homeTeam, item.awayTeam);
-      if (!key) {
-        logger.warn(`[Merge] null key for ${JSON.stringify({home: item.homeTeam, away: item.awayTeam})}`);
-        continue;
-      }
+      if (!key) continue;
 
       if (!map.has(key)) {
         map.set(key, initMatch(item, league));
@@ -122,12 +120,64 @@ function initMatch(item, league) {
 
 // ── Aggiunge una fonte al match ───────────────────────────────────────────
 function mergeSourceIntoMatch(match, item, sourceid) {
+  // BeSoccer restituisce homeData/awayData già processati
+  // Gli altri scraper restituiscono homePlayers/awayPlayers grezzi
+  const isBeSoccer = !!item.homeData;
+
+  if (isBeSoccer) {
+    // Copia direttamente i dati già processati da BeSoccer
+    const hd = item.homeData;
+    const ad = item.awayData;
+
+    // Aggiungi giocatori home alla playerMap
+    const homePlayers = hd.players || (hd.lineup || []).flat().map(p => ({
+      name: p.n, role: p.pos, num: p.num, prob: p.p
+    }));
+    mergePlayers(match.homeData._playerMap, homePlayers, sourceid);
+    match.homeData.sources.push({
+      id: sourceid, name: sourceName(sourceid),
+      form: hd.form || item.formation || 'N/D',
+      time: timeAgo(item.scrapedAt),
+      players: homePlayers.map(p => p.name || p.n || p),
+      conf:    homePlayers.filter(p => (p.prob || p.p || 0) >= 85).map(p => p.name || p.n || p),
+      doubt:   homePlayers.filter(p => { const pr = p.prob || p.p || 0; return pr < 65 && pr > 0; }).map(p => p.name || p.n || p),
+    });
+    if (match.homeData.form === 'N/D' && hd.form && hd.form !== 'N/D')
+      match.homeData.form = hd.form;
+    if (hd.bench?.length) match.homeData.bench = hd.bench;
+
+    // Aggiungi giocatori away
+    if (ad) {
+      const awayPlayers = ad.players || (ad.lineup || []).flat().map(p => ({
+        name: p.n, role: p.pos, num: p.num, prob: p.p
+      }));
+      mergePlayers(match.awayData._playerMap, awayPlayers, sourceid);
+      match.awayData.sources.push({
+        id: sourceid, name: sourceName(sourceid),
+        form: ad.form || 'N/D',
+        time: timeAgo(item.scrapedAt),
+        players: awayPlayers.map(p => p.name || p.n || p),
+        conf: [], doubt: [],
+      });
+      if (match.awayData.form === 'N/D' && ad.form && ad.form !== 'N/D')
+        match.awayData.form = ad.form;
+    }
+
+    // Dati extra partita
+    if (item.date  && !match.date)  match.date  = item.date;
+    if (item.time  && !match.time)  match.time  = item.time;
+    if (item.score) match.score = item.score;
+    if (item.staticStatus) match.staticStatus = item.staticStatus;
+    if (item.homeColor) match.homeColor = item.homeColor;
+    if (item.awayColor) match.awayColor = item.awayColor;
+    return;
+  }
+
+  // ── Scraper standard (homePlayers/awayPlayers grezzi) ──
   const homePlayers = item.homePlayers || item.starters || [];
   const awayPlayers = item.awayPlayers || [];
 
-  // ── Home ──
   mergePlayers(match.homeData._playerMap, homePlayers, sourceid);
-
   const homeSrc = {
     id:      sourceid,
     name:    sourceName(sourceid),
@@ -138,15 +188,10 @@ function mergeSourceIntoMatch(match, item, sourceid) {
     doubt:   homePlayers.filter(p => (p.prob || 0) < 65 && (p.prob || 0) > 0).map(p => p.name || p),
   };
   match.homeData.sources.push(homeSrc);
-
-  // Aggiorna modulo se non ancora impostato
   if (match.homeData.form === 'N/D' && item.formation && item.formation !== 'N/D')
     match.homeData.form = item.formation;
-
-  // Panchina
   if (item.bench?.length) match.homeData.bench = item.bench;
 
-  // ── Away (se disponibile) ──
   if (awayPlayers.length > 0) {
     mergePlayers(match.awayData._playerMap, awayPlayers, sourceid);
     match.awayData.sources.push({ ...homeSrc, players: awayPlayers.map(p => p.name || p), conf: [], doubt: [] });
