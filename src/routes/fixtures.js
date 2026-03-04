@@ -331,35 +331,27 @@ router.get('/debug', async (req, res) => {
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
-// ── Debug UEL: trova ID Europa League su TheSportsDB ────────────────────
+// ── Debug UEL ────────────────────────────────────────────────────────────
 router.get('/debug-uel', async (req, res) => {
-  const { fetchHTML } = await import('../scrapers/http.js');
   const results = {};
-
-  // TheSportsDB: cerca leagues UEFA per trovare ID UEL
   const sources = {
-    // Search for Europa League league ID
-    sportsdb_search: 'https://www.thesportsdb.com/api/v1/json/3/search_all_leagues.php?c=Europe&s=Soccer',
-    // Try known UEL IDs
-    sportsdb_4735:   'https://www.thesportsdb.com/api/v1/json/3/eventsseason.php?id=4735&s=2024-2025',
-    sportsdb_4736:   'https://www.thesportsdb.com/api/v1/json/3/eventsseason.php?id=4736&s=2024-2025',
-    sportsdb_4532:   'https://www.thesportsdb.com/api/v1/json/3/eventsseason.php?id=4532&s=2024-2025',
+    search:  'https://www.thesportsdb.com/api/v1/json/3/search_all_leagues.php?c=Europe&s=Soccer',
+    id_4735: 'https://www.thesportsdb.com/api/v1/json/3/eventsseason.php?id=4735&s=2024-2025',
+    id_4736: 'https://www.thesportsdb.com/api/v1/json/3/eventsseason.php?id=4736&s=2024-2025',
+    id_4532: 'https://www.thesportsdb.com/api/v1/json/3/eventsseason.php?id=4532&s=2024-2025',
   };
-
   for (const [name, url] of Object.entries(sources)) {
     try {
-      const text = await fetchHTML(url, { retries: 1 });
-      const parsed = JSON.parse(text);
-      // Per search: filtra solo UEL
-      if (name === 'sportsdb_search') {
-        const uel = (parsed.countrys || parsed.leagues || [])
-          .filter(l => (l.strLeague||'').toLowerCase().includes('europa'));
+      const data = await fetchJSON(url);
+      if (name === 'search') {
+        const uel = (data.countrys || data.leagues || [])
+          .filter(l => (l.strLeague||'').toLowerCase().includes('europa'))
+          .map(l => ({ id: l.idLeague, name: l.strLeague }));
         results[name] = { ok: true, uel };
       } else {
-        const events = parsed.events || [];
+        const events = data.events || [];
         results[name] = {
-          ok: true,
-          count: events.length,
+          ok: true, count: events.length,
           league: events[0]?.strLeague,
           first: events[0] ? { date: events[0].dateEvent, home: events[0].strHomeTeam, away: events[0].strAwayTeam } : null,
         };
