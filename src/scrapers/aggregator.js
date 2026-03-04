@@ -19,6 +19,7 @@ const SCRAPERS = {
   la_liga:         [{ name: 'besoccer', fn: () => besoccer('la_liga') }],
   bundesliga:      [{ name: 'besoccer', fn: () => besoccer('bundesliga') }],
   ligue_1:         [{ name: 'besoccer', fn: () => besoccer('ligue_1') }],
+  europa_league:   [{ name: 'besoccer', fn: () => besoccer('europa_league') }],
   champions_league:[{ name: 'besoccer', fn: () => besoccer('champions_league') }],
 };
 
