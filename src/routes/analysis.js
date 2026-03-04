@@ -31,33 +31,58 @@ async function generateAnalysis({ home, away, league, date, time }) {
   const apiKey = process.env.PERPLEXITY_API_KEY;
   if (!apiKey) throw new Error('PERPLEXITY_API_KEY not set in environment');
 
-  const systemPrompt = `Sei un analista calcistico esperto. Rispondi SOLO con un oggetto JSON valido, senza testo prima o dopo, senza markdown, senza backtick.`;
+  const systemPrompt = `Sei un analista calcistico esperto con accesso alle notizie più recenti. Il tuo compito principale è trovare TUTTI gli infortuni, squalifiche e assenze certe o probabili per la partita richiesta. Rispondi SOLO con un oggetto JSON valido, senza testo prima o dopo, senza markdown, senza backtick.`;
 
-  const userPrompt = `Analizza la partita: ${home} vs ${away} — ${league}, ${date} ore ${time || 'TBD'}.
+  const userPrompt = `Analizza la partita: ${home} vs ${away} (${league}), ${date} ore ${time || 'TBD'}.
 
-Cerca le informazioni più aggiornate disponibili e restituisci SOLO questo JSON:
+PRIORITA ASSOLUTA - cerca notizie di OGGI e degli ultimi 2 giorni su:
+1. Infortuni confermati o sospetti (chi si e allenato, chi no, chi e in dubbio)
+2. Squalifiche (diffide, espulsioni nelle partite precedenti)
+3. Giocatori rientrati da infortuni (potrebbero non essere al 100%)
+4. Dichiarazioni dell'allenatore in conferenza stampa
+5. Solo dopo: notizie di forma generale, mercato, precedenti
+
+Per ogni giocatore assente o in dubbio, specifica se e CERTO (confirmed_out) o DUBBIO (doubt).
+
+Restituisci SOLO questo JSON:
 
 {
   "stadium": {
     "name": "nome stadio",
-    "city": "città",
+    "city": "citta",
     "capacity": 12345,
     "surface": "erba naturale",
-    "note": "breve nota atmosfera/tifoseria"
+    "note": "breve nota atmosfera"
   },
   "news": [
-    { "type": "injury|suspension|form|transfer|other", "team": "nome squadra", "player": "nome giocatore o null", "text": "notizia aggiornata su infortuni, squalifiche o forma recente", "impact": "high|medium|low" }
+    {
+      "type": "injury|suspension|doubt|return|form|tactical|transfer|other",
+      "team": "nome squadra",
+      "player": "nome giocatore o null",
+      "status": "confirmed_out|doubt|returning|available|suspended",
+      "text": "notizia precisa, cita la fonte se possibile",
+      "impact": "high|medium|low",
+      "source_hint": "es: conferenza stampa 05/03, Sky Sport, Gazzetta"
+    }
   ],
-  "lineup_reasoning": {
-    "home": "2-3 frasi sul probabile modulo e scelte tattiche della squadra di casa basate su dati recenti",
-    "away": "2-3 frasi sul probabile modulo e scelte tattiche della squadra ospite basate su dati recenti"
+  "absences_summary": {
+    "${home}": ["lista nomi giocatori CERTI assenti"],
+    "${away}": ["lista nomi giocatori CERTI assenti"]
   },
-  "tactical_analysis": "3-4 frasi sull'analisi tattica: punti di forza, debolezze, matchup chiave",
+  "doubts_summary": {
+    "${home}": ["lista nomi giocatori IN DUBBIO"],
+    "${away}": ["lista nomi giocatori IN DUBBIO"]
+  },
+  "lineup_reasoning": {
+    "home": "2-3 frasi sul probabile modulo tenendo conto degli infortuni e dichiarazioni",
+    "away": "2-3 frasi sul probabile modulo tenendo conto degli infortuni e dichiarazioni"
+  },
+  "tactical_analysis": "3-4 frasi: punti di forza, debolezze, matchup chiave",
   "forecast": {
     "home_win": 45,
     "draw": 28,
     "away_win": 27,
-    "reasoning": "1-2 frasi che spiegano il pronostico basato su forma recente e statistiche",
+    "reasoning": "1-2 frasi pronostico considerando gli assenti e la forma recente",
     "key_factor": "il fattore decisivo della partita in una frase"
   },
   "last_meetings": [
@@ -66,7 +91,7 @@ Cerca le informazioni più aggiornate disponibili e restituisci SOLO questo JSON
   "generated_at": "${new Date().toISOString()}"
 }
 
-Usa dati reali e aggiornati. Le percentuali forecast devono sommare esattamente a 100.`;
+Ordina le news per impatto (high prima, poi medium, poi low). Le news su infortuni e squalifiche vengono prima di tutto. Le percentuali forecast devono sommare a 100 esatti.`;
 
   const response = await fetch(PERPLEXITY_API, {
     method: 'POST',
@@ -82,7 +107,7 @@ Usa dati reali e aggiornati. Le percentuali forecast devono sommare esattamente 
       ],
       max_tokens: 1500,
       temperature: 0.2,
-      search_recency_filter: 'week',
+      search_recency_filter: 'day',
       return_citations: false,
     }),
   });
@@ -104,10 +129,10 @@ Usa dati reali e aggiornati. Le percentuali forecast devono sommare esattamente 
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt },
           ],
-          max_tokens: 1500,
-          temperature: 0.2,
-          search_recency_filter: 'week',
-          return_citations: false,
+          max_tokens: 2000,
+          temperature: 0.1,
+          search_recency_filter: 'day',
+          return_citations: true,
         }),
       });
       if (!retry.ok) {
