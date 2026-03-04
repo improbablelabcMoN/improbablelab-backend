@@ -331,29 +331,39 @@ router.get('/debug', async (req, res) => {
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
-// ── Debug UEL: Google Calendar API (pubblico, no auth) ──────────────────
+// ── Debug UEL: trova ID Europa League su TheSportsDB ────────────────────
 router.get('/debug-uel', async (req, res) => {
-  // Google Calendar IDs ufficiali UEFA — pubblici, no API key necessaria
-  // Formato: https://www.googleapis.com/calendar/v3/calendars/{ID}/events?key={PUBLIC_KEY}
-  // Oppure feed pubblico JSON diretto
   const { fetchHTML } = await import('../scrapers/http.js');
   const results = {};
 
+  // TheSportsDB: cerca leagues UEFA per trovare ID UEL
   const sources = {
-    // Google Calendar public JSON feed (no auth needed for public calendars)
-    google_uel: 'https://calendar.google.com/calendar/feeds/en.uel%23sport%40group.v.calendar.google.com/public/basic?alt=json&max-results=20',
-    google_uel2: 'https://www.googleapis.com/calendar/v3/calendars/en.uel%23sport%40group.v.calendar.google.com/events?maxResults=20&singleEvents=true&orderBy=startTime&timeMin=' + new Date().toISOString(),
-    // OpenLigaDB — free, no auth
-    openliga: 'https://api.openligadb.de/getmatchdata/ucl/2024',
-    // TheSportsDB free
-    sportsdb: 'https://www.thesportsdb.com/api/v1/json/3/eventsseason.php?id=4480&s=2024-2025',
+    // Search for Europa League league ID
+    sportsdb_search: 'https://www.thesportsdb.com/api/v1/json/3/search_all_leagues.php?c=Europe&s=Soccer',
+    // Try known UEL IDs
+    sportsdb_4735:   'https://www.thesportsdb.com/api/v1/json/3/eventsseason.php?id=4735&s=2024-2025',
+    sportsdb_4736:   'https://www.thesportsdb.com/api/v1/json/3/eventsseason.php?id=4736&s=2024-2025',
+    sportsdb_4532:   'https://www.thesportsdb.com/api/v1/json/3/eventsseason.php?id=4532&s=2024-2025',
   };
 
   for (const [name, url] of Object.entries(sources)) {
     try {
       const text = await fetchHTML(url, { retries: 1 });
-      const snippet = (typeof text === 'string' ? text : JSON.stringify(text)).slice(0, 400).replace(/\s+/g,' ');
-      results[name] = { ok: true, length: text.length, snippet };
+      const parsed = JSON.parse(text);
+      // Per search: filtra solo UEL
+      if (name === 'sportsdb_search') {
+        const uel = (parsed.countrys || parsed.leagues || [])
+          .filter(l => (l.strLeague||'').toLowerCase().includes('europa'));
+        results[name] = { ok: true, uel };
+      } else {
+        const events = parsed.events || [];
+        results[name] = {
+          ok: true,
+          count: events.length,
+          league: events[0]?.strLeague,
+          first: events[0] ? { date: events[0].dateEvent, home: events[0].strHomeTeam, away: events[0].strAwayTeam } : null,
+        };
+      }
     } catch(err) {
       results[name] = { ok: false, error: err.message };
     }
