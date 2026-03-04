@@ -28,8 +28,13 @@ const FDO_LEAGUES = {
 };
 
 // ICS pubblici per campionati non coperti dalle API
+// Lista ordinata per affidabilità — prova il primo, fallback sul secondo
 const ICS_LEAGUES = {
-  europa_league: 'https://www.scorespro.com/ics/soccer/europa-league.ics',
+  europa_league: [
+    'https://www.scorespro.com/ics/soccer/europa-league.ics',
+    'https://ics.fixtur.es/v2/uefa-europa-league.ics',
+    'https://www.stanza.co/api/feeds/soccer_uel/ics/soccer_uel.ics',
+  ],
 };
 
 // ── Cache ─────────────────────────────────────────────────────────────────
@@ -203,24 +208,40 @@ function parseICS(text) {
 }
 
 async function fetchFromICS(league) {
-  const url = ICS_LEAGUES[league];
-  if (!url) throw new Error(`No ICS source for ${league}`);
-  logger.info(`[Fixtures/ICS] ${league} → ${url}`);
-  const text = await fetchJSON(url, { headers: { 'Accept': 'text/calendar,*/*' } })
-    .catch(async () => {
-      // fetchJSON might fail on text/calendar — try raw fetch via http
+  const urls = ICS_LEAGUES[league];
+  if (!urls?.length) throw new Error(`No ICS source for ${league}`);
+
+  let lastErr = null;
+  for (const url of urls) {
+    try {
+      logger.info(`[Fixtures/ICS] ${league} → ${url}`);
+      // Usa fetchHTML che è più robusto per contenuti non-JSON
       const { fetchHTML } = await import('../scrapers/http.js');
-      return fetchHTML(url);
-    });
-  const raw = typeof text === 'string' ? text : JSON.stringify(text);
-  const fixtures = parseICS(raw);
-  // Filtra solo finestra -21gg / +30gg
-  const from = Date.now() - 21*86400000;
-  const to   = Date.now() + 30*86400000;
-  return fixtures.filter(f => {
-    const t = new Date(`${f.date}T${f.time}:00`).getTime();
-    return t >= from && t <= to;
-  });
+      const text = await fetchHTML(url, {
+        retries: 2,
+        headers: { 'Accept': 'text/calendar, text/plain, */*' }
+      });
+      if (!text || !text.includes('BEGIN:VCALENDAR')) {
+        logger.warn(`[Fixtures/ICS] ${url} non ha restituito un ICS valido`);
+        continue;
+      }
+      const fixtures = parseICS(text);
+      logger.info(`[Fixtures/ICS] ${league}: ${fixtures.length} eventi da ${url}`);
+      if (!fixtures.length) continue;
+
+      // Filtra finestra -21gg / +30gg
+      const from = Date.now() - 21*86400000;
+      const to   = Date.now() + 30*86400000;
+      return fixtures.filter(f => {
+        const t = new Date(`${f.date}T${f.time || '00:00'}:00`).getTime();
+        return t >= from && t <= to;
+      });
+    } catch (err) {
+      logger.warn(`[Fixtures/ICS] ${url} failed: ${err.message}`);
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error(`All ICS sources failed for ${league}`);
 }
 
 // ════════════════════════════════════════════
