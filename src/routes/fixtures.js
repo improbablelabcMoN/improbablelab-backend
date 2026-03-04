@@ -27,6 +27,15 @@ const LEAGUE_IDS = {
 };
 
 const SEASON = 2025;
+// UCL e UEL: stagione 2024 = 2024/25 (ancora in corso a marzo 2026)
+// Le leghe domestiche usano season 2025 = 2025/26
+const LEAGUE_SEASON = {
+  champions_league: 2024,
+  europa_league:    2024,
+};
+function getSeasonFor(leagueKey) {
+  return LEAGUE_SEASON[leagueKey] || SEASON;
+}
 const BASE = 'https://v3.football.api-sports.io';
 
 // ── Cache in-memory con TTL dinamico ─────────────────────────────────────
@@ -69,10 +78,10 @@ function getDynamicTTL(fixtures) {
 }
 
 // ── Fetch fixtures da API-Football ───────────────────────────────────────
-async function fetchFixtures(leagueId, apiKey, season = SEASON) {
+async function fetchFixtures(leagueId, apiKey, leagueKey = '', season = SEASON) {
   // Prendi finestra temporale: 14 giorni fa → 21 giorni futuri
-  const from = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  const to   = new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const from = new Date(Date.now() - 21 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const to   = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
   const url = `${BASE}/fixtures?league=${leagueId}&season=${season}&from=${from}&to=${to}`;
   const data = await fetchJSON(url, {
@@ -202,8 +211,8 @@ router.get('/', async (req, res) => {
   }
 
   try {
-    logger.info(`[Fixtures] Fetching ${league} (id=${leagueId}) from API-Football...`);
-    const raw = await fetchFixtures(leagueId, apiKey);
+    logger.info(`[Fixtures] Fetching ${league} (id=${leagueId}) season=${getSeasonFor(league)} from API-Football...`);
+    const raw = await fetchFixtures(leagueId, apiKey, league, getSeasonFor(league));
 
     if (!raw.length) {
       return res.json({ league, season: SEASON, rounds: [], fixtures: [], scrapedAt: new Date().toISOString() });
