@@ -28,6 +28,7 @@ async function startServer() {
     const { default: newsRouter }      = await import('./routes/news.js');
     const { default: analysisRouter }  = await import('./routes/analysis.js');
     const { default: fixturesRouter }  = await import('./routes/fixtures.js');
+    const { default: historyRouter }   = await import('./routes/history.js');
 
     app.use('/api/lineups',   lineupsRouter);
     app.use('/api/standings', standingsRouter);
@@ -35,7 +36,7 @@ async function startServer() {
     app.use('/api/news',      newsRouter);
     app.use('/api/analysis',  analysisRouter);
     app.use('/api/fixtures',  fixturesRouter);
-app.use('/api/history',   historyRouter);
+    app.use('/api/history',   historyRouter);
 
     logger.info('Routes loaded OK');
   } catch (err) {
