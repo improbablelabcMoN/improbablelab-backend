@@ -35,18 +35,35 @@ async function generateAnalysis({ home, away, league, date, time }) {
 
   const userPrompt = `Analizza la partita: ${home} vs ${away} — ${league}, ${date} ore ${time || 'TBD'}.
 
-Cerca informazioni REALI e SPECIFICHE degli ultimi 7 giorni. 
+Cerca informazioni REALI e SPECIFICHE degli ultimi 7 giorni.
 
 Per il campo "news", inserisci SOLO notizie concrete:
 - Infortuni e assenze CONFERMATE con nome giocatore specifico
-- Squalifiche (chi ha preso il cartellino rosso o ha raggiunto la diffida)  
+- Squalifiche (chi ha preso il cartellino rosso o ha raggiunto la diffida)
 - Rientri da infortunio (chi torna disponibile)
 - Dichiarazioni dell'allenatore in conferenza stampa su formazione/assenti
 - Forma recente (ultime 3-5 partite) SOLO se rilevante per le scelte
 
-NON inserire nelle news: frasi generiche tipo "partita importante", "sfida attesa", 
-"match di cartello", orari della partita, o informazioni ovvie. 
+NON inserire nelle news: frasi generiche tipo "partita importante", "sfida attesa",
+"match di cartello", orari della partita, o informazioni ovvie.
 Ogni news deve citare un fatto specifico con nome, data o fonte.
+
+Per il campo "social_updates", cerca aggiornamenti recenti pubblicati su X (Twitter),
+siti di sport e social media nelle ultime 48 ore riguardo a entrambe le squadre.
+Seleziona SOLO fonti affidabili in questo ordine di priorità:
+1. Account ufficiali del club o dell'allenatore
+2. Giornalisti sportivi verificati (Sky Sport, BBC Sport, L'Equipe, Gazzetta, Fabrizio Romano, ecc.)
+3. Insider e account specializzati in probabili formazioni con storico affidabile
+ESCLUDI: rumors senza fonte, account sconosciuti, speculazioni non verificate.
+
+Per ogni aggiornamento social indica:
+- source_name: nome account o testata
+- source_type: "official" | "journalist" | "insider"
+- reliability: "high" | "medium"
+- text: testo/contenuto della notizia in italiano
+- player: nome giocatore citato o null
+- signal: "injury" | "starter" | "doubt" | "return" | "tactics" | "other"
+- raw_text: frase chiave originale (es: "Leao out, gioca Okafor")
 
 Restituisci SOLO questo JSON (struttura identica):
 
@@ -60,6 +77,19 @@ Restituisci SOLO questo JSON (struttura identica):
   },
   "news": [
     { "type": "injury|suspension|form|transfer|other", "team": "nome squadra", "player": "nome giocatore o null", "text": "fatto specifico con dettaglio concreto, es: out per lesione muscolare dal 28/02", "impact": "high|medium|low" }
+  ],
+  "social_updates": [
+    {
+      "team": "nome squadra",
+      "source_name": "Fabrizio Romano",
+      "source_type": "journalist",
+      "reliability": "high",
+      "text": "testo notizia in italiano",
+      "player": "nome giocatore o null",
+      "signal": "injury|starter|doubt|return|tactics|other",
+      "raw_text": "frase chiave originale",
+      "published_at": "YYYY-MM-DDTHH:mm:ssZ o null"
+    }
   ],
   "lineup_reasoning": {
     "home": "2-3 frasi sul probabile modulo e scelte tattiche della squadra di casa basate su dati recenti",
@@ -80,7 +110,9 @@ Restituisci SOLO questo JSON (struttura identica):
 }
 
 Ordina le news per impatto: prima injury e suspension (high), poi form e transfer (medium/low).
-Le percentuali forecast devono sommare esattamente a 100.`;
+Ordina social_updates per reliability (high prima) poi per data (più recente prima).
+Le percentuali forecast devono sommare esattamente a 100.
+Se non trovi aggiornamenti social affidabili, restituisci social_updates come array vuoto [].`;
 
   const response = await fetch(PERPLEXITY_API, {
     method: 'POST',
@@ -94,7 +126,7 @@ Le percentuali forecast devono sommare esattamente a 100.`;
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
-      max_tokens: 1800,
+      max_tokens: 2400,
       temperature: 0.2,
       search_recency_filter: 'day',
       return_citations: false,
@@ -118,7 +150,7 @@ Le percentuali forecast devono sommare esattamente a 100.`;
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt },
           ],
-          max_tokens: 1800,
+          max_tokens: 2400,
           temperature: 0.2,
           search_recency_filter: 'day',
           return_citations: false,
