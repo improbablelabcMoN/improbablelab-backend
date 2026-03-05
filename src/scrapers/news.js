@@ -11,7 +11,7 @@
  * Trigger: D-2 / D-1 prima della partita
  */
 
-import { fetchHtml } from './http.js';
+import { fetchHTML } from './http.js';
 import { logger }    from '../index.js';
 
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minuti
@@ -123,7 +123,7 @@ async function scrapeFromTMW(teamName) {
     .replace(/^-|-$/g, '');
 
   const url = `https://www.tuttomercatoweb.com/${slug}/notizie/`;
-  const html = await fetchHtml(url);
+  const html = await fetchHTML(url);
   if (!html) return [];
 
   return parseNewsFromHtml(html, teamName);
