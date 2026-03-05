@@ -1,5 +1,7 @@
 import { logger } from '../index.js';
 import { mergeWithHistory, autoRecord } from './history.js';
+import { applyMatchContext }              from './context.js';
+import { fetchTeamNews, applyNewsToPlayerMap } from './news.js';
 import { scrapeLineups as sosfanta }    from './sosfanta.js';
 import { scrapeLineups as fantacalcio } from './fantacalcio.js';
 import { scrapeLineups as fplitalia }   from './fplitalia.js';
@@ -47,12 +49,44 @@ export async function aggregateLeague(league) {
 
   // Arricchisci con dati storici per ogni squadra
   const liveSources = all.filter(s => s.ok && s.data?.length > 0).length;
+
+  // Scarica notizie in parallelo per tutte le squadre (L3)
+  const teamsInMatches = [...new Set(matches.flatMap(m => [m.home, m.away].filter(Boolean)))];
+  const newsMap = new Map();
+  const daysUntilMatch = matches[0]?.date
+    ? Math.ceil((new Date(matches[0].date) - Date.now()) / 86400000)
+    : 99;
+  const fetchNews = daysUntilMatch <= 2; // solo D-2 e D-1
+
+  if (fetchNews) {
+    const newsResults = await Promise.allSettled(
+      teamsInMatches.map(async team => {
+        const news = await fetchTeamNews(team, league);
+        return { team, news };
+      })
+    );
+    for (const r of newsResults) {
+      if (r.status === 'fulfilled') newsMap.set(r.value.team, r.value.news);
+    }
+  }
+
   for (const m of matches) {
     if (m.homeData?._playerMap && m.home) {
+      // L1: storico
       mergeWithHistory(m.homeData._playerMap, m.home, league, liveSources);
+      // L2: contesto partita
+      applyMatchContext(m.homeData._playerMap, m.home, league, { date: m.date, league });
+      // L3: notizie infortuni (solo D-2/D-1)
+      if (fetchNews && newsMap.has(m.home)) {
+        applyNewsToPlayerMap(m.homeData._playerMap, newsMap.get(m.home), m.home);
+      }
     }
     if (m.awayData?._playerMap && m.away) {
       mergeWithHistory(m.awayData._playerMap, m.away, league, liveSources);
+      applyMatchContext(m.awayData._playerMap, m.away, league, { date: m.date, league });
+      if (fetchNews && newsMap.has(m.away)) {
+        applyNewsToPlayerMap(m.awayData._playerMap, newsMap.get(m.away), m.away);
+      }
     }
   }
 
@@ -248,19 +282,72 @@ function mergePlayers(playerMap, players, sourceid) {
 
 // ── Finalizza il match: calcola prob mediate, costruisce lineup ───────────
 function finalizeMatch(match) {
+  // L4: se BeSoccer ha formazione CONFIRMED → blocca a 90-95, ignora storico
+  applyL4Override(match.homeData);
+  applyL4Override(match.awayData);
+
+  // L5: se partita già iniziata/finita (status=live/final) → prob 100%, blocca
+  const isOfficialLineup = match.staticStatus === 'live' || match.staticStatus === 'final';
+  if (isOfficialLineup) {
+    applyL5Lock(match.homeData);
+    applyL5Lock(match.awayData);
+  }
+
   // Processa homeData
   processTeamData(match.homeData);
   processTeamData(match.awayData);
 
   // Calcola confidenza globale
   const n        = match.homeData.sources.length;
-  match.conf     = Math.min(95, 50 + n * 15);
+  const isConfirmed = match.homeData.sources.some(s => s.conf?.length >= 10);
+  match.conf     = isOfficialLineup ? 100
+                 : isConfirmed      ? 95
+                 : Math.min(90, 50 + n * 15);
 
   // Cleanup: rimuove _playerMap dalla risposta finale
   delete match.homeData._playerMap;
   delete match.awayData._playerMap;
 
   return match;
+}
+
+// L4: BeSoccer confirmed → forza prob 90-95 per i titolari confermati
+function applyL4Override(teamData) {
+  if (!teamData?._playerMap) return;
+  const confirmedSource = teamData.sources?.find(s => s.id === 'besoccer' && s.conf?.length >= 10);
+  if (!confirmedSource) return;
+
+  const confirmedNames = new Set(confirmedSource.conf.map(n => normPlayerName(n)));
+
+  for (const [key, player] of teamData._playerMap.entries()) {
+    const pNorm = normPlayerName(player.originalName || key);
+    if (confirmedNames.has(pNorm)) {
+      // Titolare confermato da BeSoccer → prob 92, ignora note di dubbio
+      if (player.probs) player.probs[0] = 92;
+      player.newsNote    = player.newsNote?.startsWith('🤕') || player.newsNote?.startsWith('🟥')
+        ? player.newsNote   // mantieni infortuni e squalifiche
+        : '✅ Confermato';
+      player.l4confirmed = true;
+    }
+  }
+}
+
+// L5: formazione ufficiale (live/final) → prob 100 per tutti, blocca modifiche
+function applyL5Lock(teamData) {
+  if (!teamData?._playerMap) return;
+  for (const [, player] of teamData._playerMap.entries()) {
+    if (player.probs) player.probs[0] = 100;
+    player.official = true;
+    player.l5locked = true;
+  }
+}
+
+function normPlayerName(name) {
+  if (!name) return '';
+  return name.toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z]/g, ' ').replace(/\s+/g, ' ').trim()
+    .split(' ').filter(t => t.length > 2).slice(-1).join(' ');
 }
 
 function processTeamData(teamData) {
