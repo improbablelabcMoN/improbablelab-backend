@@ -182,7 +182,10 @@ router.get('/', (req, res) => {
 
   const status = jobStatus.get(cacheKey);
   if (status?.startsWith('error:')) {
-    return res.status(500).json({ ok: false, status: 'error', error: status.slice(6) });
+    const errMsg = status.slice(6);
+    logger.warn(`[analysis] returning error to client: ${errMsg}`);
+    // Ritorna 200 con flag error invece di 500, il frontend gestisce gracefully
+    return res.json({ ok: false, status: 'error', error: errMsg });
   }
 
   startJob(cacheKey, { home, away, league, date, time });
