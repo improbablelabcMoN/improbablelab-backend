@@ -1,0 +1,4 @@
+node_modules/
+.env
+# storico formazioni — persiste su Railway volume, non in git
+data/history/**/*.json
