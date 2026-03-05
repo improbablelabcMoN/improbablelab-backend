@@ -6,14 +6,14 @@ import { scrapeLineups as sosfanta }    from './sosfanta.js';
 import { scrapeLineups as fantacalcio } from './fantacalcio.js';
 import { scrapeLineups as fplitalia }   from './fplitalia.js';
 import { scrapeLineups as besoccer }    from './besoccer.js';
-import { scrapeLineups as fantagazzetta } from './fantagazzetta.js';
+// import { scrapeLineups as fantagazzetta } from './fantagazzetta.js'; // dominio irraggiungibile
 
 const SCRAPERS = {
   serie_a:         [
     { name: 'besoccer',    fn: () => besoccer('serie_a') },
     { name: 'sosfanta',    fn: sosfanta },
     { name: 'fantacalcio', fn: fantacalcio },
-    { name: 'fantagazzetta', fn: fantagazzetta },
+    // fantagazzetta: dominio non raggiungibile da Railway
   ],
   premier_league:  [
     { name: 'besoccer',  fn: () => besoccer('premier_league') },
@@ -22,7 +22,7 @@ const SCRAPERS = {
   la_liga:         [{ name: 'besoccer', fn: () => besoccer('la_liga') }],
   bundesliga:      [{ name: 'besoccer', fn: () => besoccer('bundesliga') }],
   ligue_1:         [{ name: 'besoccer', fn: () => besoccer('ligue_1') }],
-  europa_league:   [{ name: 'besoccer', fn: () => besoccer('europa_league') }],
+  // europa_league: BeSoccer non supporta EL — fonte alternativa da trovare
   champions_league:[{ name: 'besoccer', fn: () => besoccer('champions_league') }],
 };
 
