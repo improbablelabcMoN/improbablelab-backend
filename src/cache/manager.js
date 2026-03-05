@@ -8,6 +8,12 @@ const caches = {
   news:      new NodeCache({ stdTTL: Number(process.env.CACHE_TTL_NEWS)      || 600  }),
 };
 
+// Controlla se i dati lineups contengono partite live
+function hasLiveMatches(data) {
+  if (!Array.isArray(data)) return false;
+  return data.some(m => m.staticStatus === 'live');
+}
+
 export async function cached(type, key, fetcher) {
   const cache = caches[type];
   if (!cache) throw new Error(`Unknown cache type: ${type}`);
@@ -15,7 +21,13 @@ export async function cached(type, key, fetcher) {
   if (hit !== undefined) { logger.info(`CACHE HIT [${type}] ${key}`); return hit; }
   logger.info(`CACHE MISS [${type}] ${key} — fetching...`);
   const data = await fetcher();
-  cache.set(key, data);
+  // Per lineups: TTL dinamico — 60s se ci sono partite live, altrimenti default
+  if (type === 'lineups' && hasLiveMatches(data)) {
+    logger.info(`CACHE SET [${type}] ${key} — TTL 60s (partita live)`);
+    cache.set(key, data, 60);
+  } else {
+    cache.set(key, data);
+  }
   return data;
 }
 
