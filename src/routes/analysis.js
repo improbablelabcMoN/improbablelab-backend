@@ -48,13 +48,14 @@ NON inserire nelle news: frasi generiche tipo "partita importante", "sfida attes
 "match di cartello", orari della partita, o informazioni ovvie.
 Ogni news deve citare un fatto specifico con nome, data o fonte.
 
-Per il campo "social_updates", cerca aggiornamenti recenti pubblicati su X (Twitter),
-siti di sport e social media nelle ultime 48 ore riguardo a entrambe le squadre.
-Seleziona SOLO fonti affidabili in questo ordine di priorità:
-1. Account ufficiali del club o dell'allenatore
-2. Giornalisti sportivi verificati (Sky Sport, BBC Sport, L'Equipe, Gazzetta, Fabrizio Romano, ecc.)
-3. Insider e account specializzati in probabili formazioni con storico affidabile
-ESCLUDI: rumors senza fonte, account sconosciuti, speculazioni non verificate.
+Per il campo "social_updates", cerca le notizie e aggiornamenti più recenti degli ultimi 7 giorni
+su entrambe le squadre, da qualsiasi fonte giornalistica o social attendibile.
+Includi notizie da: Sky Sport, Gazzetta dello Sport, Corriere dello Sport, BBC Sport, The Athletic,
+L'Equipe, Marca, AS, Fabrizio Romano, account ufficiali club, conferenze stampa allenatori.
+Cerca specificamente: chi è infortunato, chi è squalificato, chi rientra, dichiarazioni allenatore
+sulla formazione, stato di forma della squadra, notizie tattiche importanti.
+Produci SEMPRE almeno 3-5 aggiornamenti per partita se esistono notizie rilevanti.
+Se le notizie sono le stesse del campo "news", includile comunque in social_updates con la fonte.
 
 Per ogni aggiornamento social indica:
 - source_name: nome account o testata
@@ -112,7 +113,7 @@ Restituisci SOLO questo JSON (struttura identica):
 Ordina le news per impatto: prima injury e suspension (high), poi form e transfer (medium/low).
 Ordina social_updates per reliability (high prima) poi per data (più recente prima).
 Le percentuali forecast devono sommare esattamente a 100.
-Se non trovi aggiornamenti social affidabili, restituisci social_updates come array vuoto [].`;
+Restituisci SEMPRE almeno 3 elementi in social_updates se esistono notizie sulla partita. Solo se non trovi assolutamente nulla, restituisci array vuoto.`;
 
   const response = await fetch(PERPLEXITY_API, {
     method: 'POST',
