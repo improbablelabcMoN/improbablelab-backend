@@ -26,7 +26,7 @@ const FDO_LEAGUES = {
   bundesliga:       'BL1',
   ligue_1:          'FL1',
   champions_league: 'CL',
-  europa_league:    'EL',   // richiede tier 1 — gestito con fallback graceful
+  // europa_league: 'EL' — piano free FDO non include EL (403), nessuna fonte disponibile
 };
 
 // Campionati senza API dedicata — usano solo dati lineups da BeSoccer
