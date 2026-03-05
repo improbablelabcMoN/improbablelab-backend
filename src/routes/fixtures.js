@@ -16,10 +16,12 @@ const router = Router();
 
 // ── Sorgenti per campionato ───────────────────────────────────────────────
 const APF_BASE    = 'https://v3.football.api-sports.io';
-const APF_LEAGUES = { serie_a: 135, premier_league: 39 };
+const APF_LEAGUES = {}; // piano free non funziona da server — tutto su football-data.org
 
 const FDO_BASE    = 'https://api.football-data.org/v4';
 const FDO_LEAGUES = {
+  serie_a:          'SA',   // migrato da API-Football (piano free blocca server IP)
+  premier_league:   'PL',   // migrato da API-Football
   la_liga:          'PD',
   bundesliga:       'BL1',
   ligue_1:          'FL1',
@@ -151,8 +153,9 @@ async function fetchFromFdo(league, apiKey) {
     return (d.matches || []).map(fdoTransform);
   } catch (err) {
     // 403 = piano non include questa competizione → restituisci vuoto, non errore
-    if (err.message?.includes('403') || err.response?.status === 403) {
-      logger.warn(`[Fixtures/FDO] ${league}: 403 — competizione non nel piano, skip fixtures`);
+    const s = err.response?.status;
+    if (s === 403 || s === 429 || err.message?.includes('403') || err.message?.includes('429')) {
+      logger.warn(`[Fixtures/FDO] ${league}: ${s || 'err'} — skip`);
       return [];
     }
     throw err;
@@ -278,7 +281,9 @@ router.get('/', async (req, res) => {
 
     if (!fixtures.length) {
       logger.warn(`[Fixtures] ${league}: 0 risultati`);
-      return res.json({ league, rounds: [], fixtures: [], fetchedAt: new Date().toISOString() });
+      const emptyResp = { league, rounds: [], fixtures: [], fetchedAt: new Date().toISOString() };
+      setCached(cacheKey, emptyResp, 2 * 3600000); // 2h — evita hammering API
+      return res.json(emptyResp);
     }
 
     const today  = new Date().toISOString().slice(0,10);
