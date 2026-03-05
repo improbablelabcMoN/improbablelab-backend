@@ -11,7 +11,7 @@ export const LEAGUE_SLUGS = {
   bundesliga:       'bundesliga',
   ligue_1:          'ligue_1',
   champions_league: 'champions_league',
-  europa_league:    'europa-league',
+  // europa_league: non disponibile su BeSoccer pubblico
 };
 
 function parseDateTime(dateStr, hourStr) {
