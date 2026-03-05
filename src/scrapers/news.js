@@ -115,9 +115,9 @@ export function applyNewsToPlayerMap(playerMap, news, teamName) {
 // ── Scraping TMW ──────────────────────────────────────────────────────────
 
 async function scrapeFromTMW(teamName, league = '') {
-  // TMW è focalizzato sul calcio italiano — salta per leghe estere
-  const italianLeagues = new Set(['serie_a']);
-  if (!italianLeagues.has(league)) return [];
+  // TMW scraping temporaneamente disabilitato (URL non stabile)
+  // TODO: trovare endpoint corretto
+  return [];
 
   const slug = teamName.toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
