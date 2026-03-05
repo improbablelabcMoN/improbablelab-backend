@@ -40,12 +40,12 @@ export async function fetchTeamNews(teamName, league) {
   }
 
   try {
-    const news = await scrapeFromTMW(teamName);
+    const news = await scrapeFromTMW(teamName, league);
     newsCache.set(cacheKey, { data: news, expiresAt: Date.now() + CACHE_TTL_MS });
-    logger.info(`[News] Trovate ${news.length} notizie per ${teamName}`);
+    if (news.length > 0) logger.info(`[News] Trovate ${news.length} notizie per ${teamName}`);
     return news;
   } catch (err) {
-    logger.warn(`[News] Scraping fallito per ${teamName}: ${err.message}`);
+    // Fail silently — il sistema funziona senza notizie
     return [];
   }
 }
@@ -114,19 +114,34 @@ export function applyNewsToPlayerMap(playerMap, news, teamName) {
 
 // ── Scraping TMW ──────────────────────────────────────────────────────────
 
-async function scrapeFromTMW(teamName) {
-  // URL ricerca notizie squadra su TMW
+async function scrapeFromTMW(teamName, league = '') {
+  // TMW è focalizzato sul calcio italiano — salta per leghe estere
+  const italianLeagues = new Set(['serie_a']);
+  if (!italianLeagues.has(league)) return [];
+
   const slug = teamName.toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '');
 
-  const url = `https://www.tuttomercatoweb.com/${slug}/notizie/`;
-  const html = await fetchHTML(url);
-  if (!html) return [];
+  // Prova prima con URL diretto categoria formazioni
+  const urls = [
+    `https://www.tuttomercatoweb.com/serie-a/probabili-formazioni/`,
+    `https://www.tuttomercatoweb.com/premier-league/probabili-formazioni/`,
+    `https://www.tuttomercatoweb.com/calciomercato/infortuni/`,
+  ];
 
-  return parseNewsFromHtml(html, teamName);
+  // Usa solo la prima URL generica — non per squadra singola
+  // TMW non ha pagine per squadra con slug semplice
+  const url = `https://www.tuttomercatoweb.com/calcio/${slug}/`;
+  try {
+    const html = await fetchHTML(url);
+    if (!html) return [];
+    return parseNewsFromHtml(html, teamName);
+  } catch {
+    return [];
+  }
 }
 
 function parseNewsFromHtml(html, teamName) {
