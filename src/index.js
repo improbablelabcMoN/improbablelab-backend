@@ -35,6 +35,7 @@ async function startServer() {
     app.use('/api/news',      newsRouter);
     app.use('/api/analysis',  analysisRouter);
     app.use('/api/fixtures',  fixturesRouter);
+app.use('/api/history',   historyRouter);
 
     logger.info('Routes loaded OK');
   } catch (err) {
