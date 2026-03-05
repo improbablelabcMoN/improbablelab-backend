@@ -1,4 +1,5 @@
 import { logger } from '../index.js';
+import { mergeWithHistory, autoRecord } from './history.js';
 import { scrapeLineups as sosfanta }    from './sosfanta.js';
 import { scrapeLineups as fantacalcio } from './fantacalcio.js';
 import { scrapeLineups as fplitalia }   from './fplitalia.js';
@@ -43,6 +44,21 @@ export async function aggregateLeague(league) {
 
   const all     = results.map(r => r.value || r.reason);
   const matches = mergeMatches(all, league);
+
+  // Arricchisci con dati storici per ogni squadra
+  const liveSources = all.filter(s => s.ok && s.data?.length > 0).length;
+  for (const m of matches) {
+    if (m.homeData?._playerMap && m.home) {
+      mergeWithHistory(m.homeData._playerMap, m.home, league, liveSources);
+    }
+    if (m.awayData?._playerMap && m.away) {
+      mergeWithHistory(m.awayData._playerMap, m.away, league, liveSources);
+    }
+  }
+
+  // Registra automaticamente partite finite nel database storico
+  autoRecord(matches, league);
+
   const sources = all.map(s => ({
     id:    s.name,
     name:  sourceName(s.name),
