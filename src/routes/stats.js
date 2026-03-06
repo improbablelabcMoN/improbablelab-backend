@@ -7,33 +7,41 @@ router.get('/debug', async (req, res) => {
   const key = process.env.API_FOOTBALL_KEY;
   if (!key) return res.json({ ok: false, error: 'API_FOOTBALL_KEY non settata' });
 
-  const LEAGUE_IDS = { serie_a: 135, premier_league: 39, la_liga: 140, bundesliga: 78, ligue_1: 61, champions_league: 2 };
-  const leagueId = LEAGUE_IDS[league] || 135;
+  const leagueId = 135;
 
-  // Chiamata diretta senza cache per vedere la risposta raw
-  try {
-    const url = `https://v3.football.api-sports.io/fixtures?league=${leagueId}&season=2024&next=5`;
-    const resp = await fetch(url, { headers: { 'x-apisports-key': key } });
-    const data = await resp.json();
+  // Prova entrambi gli endpoint: diretto e RapidAPI
+  const tests = [
+    {
+      name: 'api-sports diretto',
+      url: `https://v3.football.api-sports.io/fixtures?league=${leagueId}&season=2024&next=5`,
+      headers: { 'x-apisports-key': key },
+    },
+    {
+      name: 'RapidAPI',
+      url: `https://api-football-v1.p.rapidapi.com/v3/fixtures?league=${leagueId}&season=2024&next=5`,
+      headers: { 'x-rapidapi-key': key, 'x-rapidapi-host': 'api-football-v1.p.rapidapi.com' },
+    },
+  ];
 
-    res.json({
-      ok: true,
-      url,
-      http_status: resp.status,
-      api_results: data?.results,
-      api_errors: data?.errors,
-      api_remaining: resp.headers.get('x-ratelimit-requests-remaining'),
-      sample: data?.response?.slice(0,2).map(f => ({
-        id: f.fixture?.id,
-        home: f.teams?.home?.name,
-        away: f.teams?.away?.name,
-        date: f.fixture?.date,
-      })) || [],
-    });
-  } catch (err) {
-    res.json({ ok: false, error: err.message });
+  const results = [];
+  for (const t of tests) {
+    try {
+      const resp = await fetch(t.url, { headers: t.headers });
+      const data = await resp.json();
+      results.push({
+        name: t.name,
+        status: resp.status,
+        results: data?.results,
+        errors: data?.errors,
+        sample: data?.response?.slice(0,1).map(f => ({ home: f.teams?.home?.name, away: f.teams?.away?.name })) || [],
+      });
+    } catch (err) {
+      results.push({ name: t.name, error: err.message });
+    }
   }
+
+  res.json({ key_length: key.length, key_prefix: key.slice(0,6)+'...', results });
 });
 
-router.get('/', (req, res) => res.json({ note: 'Usa /api/stats/debug?league=serie_a' }));
+router.get('/', (req, res) => res.json({ note: 'Usa /api/stats/debug' }));
 export default router;
