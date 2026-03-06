@@ -27,58 +27,66 @@ function cacheSet(key, data) {
   doneCache.set(key, { data, expiresAt: Date.now() + CACHE_TTL_MS });
 }
 
+// ── Mappa account X per lega/squadra ────────────────────────────────────────
+// Usata per guidare Perplexity verso fonti X di qualità specifiche per squadra
+const SOCIAL_SOURCES = {
+  premier_league: {
+    _generic: ['@FFScoutCity', '@OptaJoe'],
+    'Arsenal': ['@afcstuff'],
+    'Manchester City': ['@City_Xtra'],
+    'Liverpool': ['@thisisanfield'],
+    'Chelsea': ['@AbsoluteChelsea'],
+    'Manchester United': ['@UtdDistrict'],
+    'Tottenham': ['@thespursweb'],
+    'Aston Villa': ['@villareport'],
+    'Newcastle': ['@NUFC360'],
+    'West Ham': ['@ExWHUEmployee'],
+    'Everton': ['@toffeetvefc'],
+    'Brighton': ['@BHAFCxtra'],
+    'Nottingham Forest': ['@ForestReport'],
+    'Fulham': ['@FulhamFC_News'],
+    'Wolves': ['@WolvesXtra'],
+    'Crystal Palace': ['@PalaceXtra'],
+    'Brentford': ['@BrentfordTweet'],
+    'Bournemouth': ['@AFCBxtra'],
+    'Ipswich': ['@IpswichExtra'],
+    'Leeds': ['@LUFC_News'],
+    'Sunderland': ['@SunderlandEcho'],
+    'Burnley': ['@BurnleyFCNews'],
+    'Leicester': ['@FoxesExtra'],
+  },
+};
+
+function getSocialSources(league, home, away) {
+  const map = SOCIAL_SOURCES[league];
+  if (!map) return null;
+  const accounts = [...(map._generic || [])];
+  // cerca match parziale (es. "Man City" → "Manchester City")
+  for (const [team, accs] of Object.entries(map)) {
+    if (team === '_generic') continue;
+    const t = team.toLowerCase();
+    const h = home.toLowerCase();
+    const a = away.toLowerCase();
+    if (h.includes(t) || t.includes(h) || h.includes(t.split(' ')[0])) accounts.push(...accs);
+    if (a.includes(t) || t.includes(a) || a.includes(t.split(' ')[0])) accounts.push(...accs);
+  }
+  return [...new Set(accounts)]; // dedup
+}
+
 async function generateAnalysis({ home, away, league, date, time }) {
   const apiKey = process.env.PERPLEXITY_API_KEY;
   if (!apiKey) throw new Error('PERPLEXITY_API_KEY not set in environment');
 
-  const today = new Date().toISOString().slice(0, 10);
-  const systemPrompt = `Sei un analista calcistico esperto con accesso a notizie in tempo reale. Rispondi SOLO con un oggetto JSON valido, senza testo prima o dopo, senza markdown, senza backtick.
-REGOLE FONDAMENTALI:
-- Cita SOLO giocatori che sono ATTUALMENTE in rosa nella squadra indicata (stagione corrente ${today.slice(0,4)}/${String(Number(today.slice(0,4))+1).slice(2)})
-- Non citare mai giocatori ceduti, in prestito altrove, o svincolati
-- Se non sei sicuro che un giocatore sia ancora in rosa, NON citarlo
-- Solo fatti concreti, specifici e verificabili con fonte e data recente`;
+  const socialSources = getSocialSources(league, home, away);
+  const socialInstruction = socialSources?.length
+    ? `\nPer la sezione social_updates, cerca notizie recenti (ultimi 7 giorni) su X/Twitter privilegiando questi account: ${socialSources.join(', ')}. Estrai aggiornamenti su infortuni, conferenze stampa, indisponibili, lineup leaks.`
+    : '';
 
-  const userPrompt = `Analizza la partita: ${home} vs ${away} — ${league}, ${date} ore ${time || 'TBD'}.
-Data di oggi: ${today}. Cerca SOLO informazioni degli ultimi 14 giorni.
+  const systemPrompt = `Sei un analista calcistico esperto. Rispondi SOLO con un oggetto JSON valido, senza testo prima o dopo, senza markdown, senza backtick.`;
 
-VERIFICA ROSA: Prima di citare qualsiasi giocatore, verifica che sia ATTUALMENTE tesserato con quella squadra nella stagione in corso. Non citare giocatori ceduti nel mercato estivo o invernale recente.
+  const userPrompt = `Analizza la partita: ${home} vs ${away} — ${league}, ${date} ore ${time || 'TBD'}.${socialInstruction}
 
-Per il campo "news", inserisci ONLY notizie concrete e verificate:
-- Infortuni e assenze CONFERMATE con nome giocatore e data prevista rientro
-- Squalifiche (cartellino rosso o diffida raggiunta)  
-- Rientri da infortunio con tempistica
-- Dichiarazioni RECENTI dell'allenatore in conferenza stampa (ultimi 3 giorni)
-- Notizie da mercato che impattano la rosa ATTUALE
-
-Per il campo "press_conference", cerca le ultime dichiarazioni pre-partita dell'allenatore:
-- Chi ha dichiarato indisponibile o dubbio
-- Indicazioni tattiche date pubblicamente
-- Stato di forma di giocatori chiave menzionato dall'allenatore
-- Data e fonte della conferenza
-
-NON inserire nelle news: frasi generiche, "partita importante", orari, informazioni ovvie.
-Ogni news deve citare un fatto specifico con nome giocatore, data e fonte.
-
-Per il campo "social_updates", cerca le notizie e aggiornamenti più recenti degli ultimi 7 giorni
-su entrambe le squadre, da qualsiasi fonte giornalistica o social attendibile.
-Includi notizie da: Sky Sport, Gazzetta dello Sport, Corriere dello Sport, BBC Sport, The Athletic,
-L'Equipe, Marca, AS, Fabrizio Romano, account ufficiali club, conferenze stampa allenatori.
-Cerca specificamente: chi è infortunato, chi è squalificato, chi rientra, dichiarazioni allenatore
-sulla formazione, stato di forma della squadra, notizie tattiche importanti.
-Produci SEMPRE almeno 3-5 aggiornamenti per partita se esistono notizie rilevanti.
-Se le notizie sono le stesse del campo "news", includile comunque in social_updates con la fonte.
-
-Per ogni aggiornamento social indica:
-- source_name: nome account o testata
-- source_type: "official" | "journalist" | "insider"
-- reliability: "high" | "medium"
-- text: testo/contenuto della notizia in italiano
-- player: nome giocatore citato o null
-- signal: "injury" | "starter" | "doubt" | "return" | "tactics" | "other"
-- raw_text: frase chiave originale (es: "Leao out, gioca Okafor")
-
-Restituisci SOLO questo JSON (struttura identica):
+Cerca le informazioni più aggiornate disponibili e restituisci SOLO questo JSON:
 
 {
   "stadium": {
@@ -89,20 +97,7 @@ Restituisci SOLO questo JSON (struttura identica):
     "note": "breve nota atmosfera/tifoseria"
   },
   "news": [
-    { "type": "injury|suspension|form|transfer|other", "team": "nome squadra", "player": "nome giocatore o null", "text": "fatto specifico con dettaglio concreto, es: out per lesione muscolare dal 28/02", "impact": "high|medium|low" }
-  ],
-  "social_updates": [
-    {
-      "team": "nome squadra",
-      "source_name": "Fabrizio Romano",
-      "source_type": "journalist",
-      "reliability": "high",
-      "text": "testo notizia in italiano",
-      "player": "nome giocatore o null",
-      "signal": "injury|starter|doubt|return|tactics|other",
-      "raw_text": "frase chiave originale",
-      "published_at": "YYYY-MM-DDTHH:mm:ssZ o null"
-    }
+    { "type": "injury|suspension|form|transfer|other", "team": "nome squadra", "player": "nome giocatore o null", "text": "notizia aggiornata su infortuni, squalifiche o forma recente", "impact": "high|medium|low" }
   ],
   "lineup_reasoning": {
     "home": "2-3 frasi sul probabile modulo e scelte tattiche della squadra di casa basate su dati recenti",
@@ -116,34 +111,16 @@ Restituisci SOLO questo JSON (struttura identica):
     "reasoning": "1-2 frasi che spiegano il pronostico basato su forma recente e statistiche",
     "key_factor": "il fattore decisivo della partita in una frase"
   },
-  "press_conference": {
-    "home": {
-      "coach": "nome allenatore",
-      "date": "YYYY-MM-DD o null",
-      "absences": ["giocatore1", "giocatore2"],
-      "doubts": ["giocatore dubbio"],
-      "quote": "dichiarazione chiave in italiano o null",
-      "source": "fonte es. Sky Sport IT"
-    },
-    "away": {
-      "coach": "nome allenatore",
-      "date": "YYYY-MM-DD o null",
-      "absences": [],
-      "doubts": [],
-      "quote": null,
-      "source": null
-    }
-  },
   "last_meetings": [
     { "date": "YYYY-MM-DD", "result": "2-1", "winner": "home|away|draw" }
+  ],
+  "social_updates": [
+    { "account": "@handle", "text": "testo aggiornamento", "team": "nome squadra o null", "published_at": "YYYY-MM-DDTHH:MM:SSZ" }
   ],
   "generated_at": "${new Date().toISOString()}"
 }
 
-Ordina le news per impatto: prima injury e suspension (high), poi form e transfer (medium/low).
-Ordina social_updates per reliability (high prima) poi per data (più recente prima).
-Le percentuali forecast devono sommare esattamente a 100.
-Restituisci SEMPRE almeno 3 elementi in social_updates se esistono notizie sulla partita. Solo se non trovi assolutamente nulla, restituisci array vuoto.`;
+Usa dati reali e aggiornati. Le percentuali forecast devono sommare esattamente a 100. Per social_updates includi 3-6 aggiornamenti recenti (ultimi 7 giorni) rilevanti per questa partita: infortuni, dichiarazioni, indisponibili, lineup leaks. Se non trovi tweet specifici, usa notizie da qualsiasi fonte affidabile per quel club.`;
 
   const response = await fetch(PERPLEXITY_API, {
     method: 'POST',
@@ -157,7 +134,7 @@ Restituisci SEMPRE almeno 3 elementi in social_updates se esistono notizie sulla
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
-      max_tokens: 3000,
+      max_tokens: 2000,
       temperature: 0.2,
       search_recency_filter: 'week',
       return_citations: false,
@@ -181,7 +158,7 @@ Restituisci SEMPRE almeno 3 elementi in social_updates se esistono notizie sulla
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt },
           ],
-          max_tokens: 3000,
+          max_tokens: 2000,
           temperature: 0.2,
           search_recency_filter: 'week',
           return_citations: false,
@@ -245,10 +222,7 @@ router.get('/', (req, res) => {
 
   const status = jobStatus.get(cacheKey);
   if (status?.startsWith('error:')) {
-    const errMsg = status.slice(6);
-    logger.warn(`[analysis] returning error to client: ${errMsg}`);
-    // Ritorna 200 con flag error invece di 500, il frontend gestisce gracefully
-    return res.json({ ok: false, status: 'error', error: errMsg });
+    return res.status(500).json({ ok: false, status: 'error', error: status.slice(6) });
   }
 
   startJob(cacheKey, { home, away, league, date, time });
