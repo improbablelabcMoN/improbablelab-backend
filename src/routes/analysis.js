@@ -31,22 +31,34 @@ async function generateAnalysis({ home, away, league, date, time }) {
   const apiKey = process.env.PERPLEXITY_API_KEY;
   if (!apiKey) throw new Error('PERPLEXITY_API_KEY not set in environment');
 
-  const systemPrompt = `Sei un analista calcistico esperto. Rispondi SOLO con un oggetto JSON valido, senza testo prima o dopo, senza markdown, senza backtick. Non includere mai notizie generiche o ovvie — solo fatti concreti, specifici e verificabili.`;
+  const today = new Date().toISOString().slice(0, 10);
+  const systemPrompt = `Sei un analista calcistico esperto con accesso a notizie in tempo reale. Rispondi SOLO con un oggetto JSON valido, senza testo prima o dopo, senza markdown, senza backtick.
+REGOLE FONDAMENTALI:
+- Cita SOLO giocatori che sono ATTUALMENTE in rosa nella squadra indicata (stagione corrente ${today.slice(0,4)}/${String(Number(today.slice(0,4))+1).slice(2)})
+- Non citare mai giocatori ceduti, in prestito altrove, o svincolati
+- Se non sei sicuro che un giocatore sia ancora in rosa, NON citarlo
+- Solo fatti concreti, specifici e verificabili con fonte e data recente`;
 
   const userPrompt = `Analizza la partita: ${home} vs ${away} — ${league}, ${date} ore ${time || 'TBD'}.
+Data di oggi: ${today}. Cerca SOLO informazioni degli ultimi 14 giorni.
 
-Cerca informazioni REALI e SPECIFICHE degli ultimi 7 giorni.
+VERIFICA ROSA: Prima di citare qualsiasi giocatore, verifica che sia ATTUALMENTE tesserato con quella squadra nella stagione in corso. Non citare giocatori ceduti nel mercato estivo o invernale recente.
 
-Per il campo "news", inserisci SOLO notizie concrete:
-- Infortuni e assenze CONFERMATE con nome giocatore specifico
-- Squalifiche (chi ha preso il cartellino rosso o ha raggiunto la diffida)
-- Rientri da infortunio (chi torna disponibile)
-- Dichiarazioni dell'allenatore in conferenza stampa su formazione/assenti
-- Forma recente (ultime 3-5 partite) SOLO se rilevante per le scelte
+Per il campo "news", inserisci ONLY notizie concrete e verificate:
+- Infortuni e assenze CONFERMATE con nome giocatore e data prevista rientro
+- Squalifiche (cartellino rosso o diffida raggiunta)  
+- Rientri da infortunio con tempistica
+- Dichiarazioni RECENTI dell'allenatore in conferenza stampa (ultimi 3 giorni)
+- Notizie da mercato che impattano la rosa ATTUALE
 
-NON inserire nelle news: frasi generiche tipo "partita importante", "sfida attesa",
-"match di cartello", orari della partita, o informazioni ovvie.
-Ogni news deve citare un fatto specifico con nome, data o fonte.
+Per il campo "press_conference", cerca le ultime dichiarazioni pre-partita dell'allenatore:
+- Chi ha dichiarato indisponibile o dubbio
+- Indicazioni tattiche date pubblicamente
+- Stato di forma di giocatori chiave menzionato dall'allenatore
+- Data e fonte della conferenza
+
+NON inserire nelle news: frasi generiche, "partita importante", orari, informazioni ovvie.
+Ogni news deve citare un fatto specifico con nome giocatore, data e fonte.
 
 Per il campo "social_updates", cerca le notizie e aggiornamenti più recenti degli ultimi 7 giorni
 su entrambe le squadre, da qualsiasi fonte giornalistica o social attendibile.
@@ -104,6 +116,24 @@ Restituisci SOLO questo JSON (struttura identica):
     "reasoning": "1-2 frasi che spiegano il pronostico basato su forma recente e statistiche",
     "key_factor": "il fattore decisivo della partita in una frase"
   },
+  "press_conference": {
+    "home": {
+      "coach": "nome allenatore",
+      "date": "YYYY-MM-DD o null",
+      "absences": ["giocatore1", "giocatore2"],
+      "doubts": ["giocatore dubbio"],
+      "quote": "dichiarazione chiave in italiano o null",
+      "source": "fonte es. Sky Sport IT"
+    },
+    "away": {
+      "coach": "nome allenatore",
+      "date": "YYYY-MM-DD o null",
+      "absences": [],
+      "doubts": [],
+      "quote": null,
+      "source": null
+    }
+  },
   "last_meetings": [
     { "date": "YYYY-MM-DD", "result": "2-1", "winner": "home|away|draw" }
   ],
@@ -127,9 +157,9 @@ Restituisci SEMPRE almeno 3 elementi in social_updates se esistono notizie sulla
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
-      max_tokens: 2400,
+      max_tokens: 3000,
       temperature: 0.2,
-      search_recency_filter: 'day',
+      search_recency_filter: 'week',
       return_citations: false,
     }),
   });
@@ -151,9 +181,9 @@ Restituisci SEMPRE almeno 3 elementi in social_updates se esistono notizie sulla
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt },
           ],
-          max_tokens: 2400,
+          max_tokens: 3000,
           temperature: 0.2,
-          search_recency_filter: 'day',
+          search_recency_filter: 'week',
           return_citations: false,
         }),
       });
