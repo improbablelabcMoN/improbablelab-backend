@@ -163,3 +163,41 @@ export function normalizePosition(pos = '') {
   if (['F','FWD','FORWARD','ATT','ST','LW','RW'].includes(p)) return 'ATT';
   return 'N/D';
 }
+
+// ── Statistiche giocatori per squadra (stagione corrente) ──────────────────
+const playerStatsCache = new Map(); // teamId_leagueId → { stats: Map<normalizedName, obj>, expiresAt }
+const PLAYER_STATS_TTL = 24 * 60 * 60 * 1000; // 24h — dati lenti a cambiare
+
+function normalizePlayerName(name = '') {
+  return name.toLowerCase().replace(/[^a-z]/g, '').slice(0, 12);
+}
+
+export async function getPlayerStats(teamId, leagueId) {
+  if (!teamId || !leagueId) return new Map();
+  const cacheKey = `${teamId}_${leagueId}`;
+  const cached = playerStatsCache.get(cacheKey);
+  if (cached && Date.now() < cached.expiresAt) return cached.stats;
+
+  try {
+    const data = await apiGet('players', { team: teamId, league: leagueId, season: SEASON });
+    const stats = new Map();
+    for (const entry of (data?.response || [])) {
+      const p = entry.player;
+      const s = entry.statistics?.[0];
+      if (!p || !s) continue;
+      const key = normalizePlayerName(p.name);
+      stats.set(key, {
+        g:   s.goals?.total   || 0,
+        a:   s.goals?.assists || 0,
+        app: s.games?.appearences || 0,
+        rat: parseFloat(s.games?.rating) || 6.5,
+        // Ultime partite: non disponibili qui, lasciamo h:[] per ora
+      });
+    }
+    playerStatsCache.set(cacheKey, { stats, expiresAt: Date.now() + PLAYER_STATS_TTL });
+    return stats;
+  } catch (err) {
+    // Non loggare come errore — API-Football key potrebbe non esserci
+    return new Map();
+  }
+}
