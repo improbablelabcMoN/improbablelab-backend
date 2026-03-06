@@ -95,6 +95,12 @@ async function loadFixtureMap(league) {
   }
 }
 
+// Lista tutte le fixture in cache (per debug)
+export async function listFixtures(league) {
+  const map = await loadFixtureMap(league);
+  return [...map.entries()].map(([key, v]) => ({ key, home: v.homeName, away: v.awayName, date: v.date, fixtureId: v.fixtureId }));
+}
+
 // Cerca il fixtureId di una partita dato home/away (fuzzy match)
 export async function findFixture(league, homeTeam, awayTeam) {
   const map = await loadFixtureMap(league);
