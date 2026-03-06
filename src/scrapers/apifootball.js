@@ -26,7 +26,16 @@ const LEAGUE_IDS = {
   champions_league: 2,
 };
 
-const SEASON = 2025;
+const SEASON_BY_LEAGUE = {
+  serie_a: 2024, premier_league: 2024, la_liga: 2024,
+  bundesliga: 2024, ligue_1: 2024, champions_league: 2024, europa_league: 2024,
+};
+function getSeason(leagueId) {
+  // Mappa leagueId → slug per trovare la stagione
+  const idToSlug = { 135:'serie_a', 39:'premier_league', 140:'la_liga', 78:'bundesliga', 61:'ligue_1', 2:'champions_league', 3:'europa_league' };
+  const slug = idToSlug[leagueId];
+  return SEASON_BY_LEAGUE[slug] || 2024;
+}
 
 // Cache
 const fixtureMapCache = new Map(); // leagueId → { map: {normalizedKey → fixture}, expiresAt }
@@ -61,11 +70,14 @@ async function loadFixtureMap(league) {
 
   try {
     logger.info(`[API-Football] Loading fixture map for ${league}`);
+    const season = getSeason(leagueId);
+    logger.info(`[API-Football] loadFixtureMap ${league} leagueId=${leagueId} season=${season}`);
     const data = await apiGet('fixtures', {
       league: leagueId,
-      season: SEASON,
+      season: season,
       next:   20,
     });
+    logger.info(`[API-Football] fixtures response: ${data?.results} results, errors=${JSON.stringify(data?.errors)}`);
 
     const map = new Map();
     for (const f of (data?.response || [])) {
@@ -185,7 +197,8 @@ export async function getPlayerStats(teamId, leagueId) {
   if (cached && Date.now() < cached.expiresAt) return cached.stats;
 
   try {
-    const data = await apiGet('players', { team: teamId, league: leagueId, season: SEASON });
+    const season = getSeason(leagueId);
+    const data = await apiGet('players', { team: teamId, league: leagueId, season: season });
     const stats = new Map();
     for (const entry of (data?.response || [])) {
       const p = entry.player;
