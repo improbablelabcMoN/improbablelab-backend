@@ -6,6 +6,7 @@ import { scrapeLineups as sosfanta }    from './sosfanta.js';
 import { scrapeLineups as fantacalcio } from './fantacalcio.js';
 import { scrapeLineups as fplitalia }   from './fplitalia.js';
 import { scrapeLineups as besoccer }    from './besoccer.js';
+import { findFixture, getPlayerStats }  from './apifootball.js';
 // import { scrapeLineups as fantagazzetta } from './fantagazzetta.js'; // dominio irraggiungibile
 
 const SCRAPERS = {
@@ -88,6 +89,29 @@ export async function aggregateLeague(league) {
         applyNewsToPlayerMap(m.awayData._playerMap, newsMap.get(m.away), m.away);
       }
     }
+  }
+
+  // ── Arricchisci statistiche giocatori da API-Football (g, a, app, rat) ──
+  // Una chiamata per squadra, TTL 24h — usa i teamId dal fixtureMap
+  const LEAGUE_IDS_STATS = {
+    serie_a: 135, premier_league: 39, la_liga: 140,
+    bundesliga: 78, ligue_1: 61, champions_league: 2, europa_league: 3,
+  };
+  const leagueId = LEAGUE_IDS_STATS[league];
+  if (leagueId && process.env.API_FOOTBALL_KEY) {
+    const statsJobs = matches.map(async m => {
+      try {
+        const fx = await findFixture(league, m.home, m.away);
+        if (!fx) return;
+        const [homeStats, awayStats] = await Promise.all([
+          getPlayerStats(fx.homeTeamId, leagueId),
+          getPlayerStats(fx.awayTeamId, leagueId),
+        ]);
+        applyPlayerStats(m.homeData?.players, homeStats);
+        applyPlayerStats(m.awayData?.players, awayStats);
+      } catch (e) { /* silenzioso — stat opzionali */ }
+    });
+    await Promise.allSettled(statsJobs);
   }
 
   // Registra automaticamente partite finite nel database storico
@@ -464,4 +488,26 @@ function sourceName(id) {
     apifootball:   'API-Football',
     tmw:           'TuttoMercatoWeb',
   }[id] || id;
+}
+
+// ── Applica statistiche API-Football ai players finalizzati ───────────────
+// statsMap: Map<normalizedName, { g, a, app, rat }> da getPlayerStats
+function applyPlayerStats(players, statsMap) {
+  if (!players?.length || !statsMap?.size) return;
+  for (const p of players) {
+    const key = (p.n || '').toLowerCase().replace(/[^a-z]/g, '').slice(0, 12);
+    // Cerca match esatto prima, poi parziale (es. "bellingham" vs "jude bellingham")
+    let stat = statsMap.get(key);
+    if (!stat) {
+      for (const [k, v] of statsMap.entries()) {
+        if (k.includes(key) || key.includes(k)) { stat = v; break; }
+      }
+    }
+    if (stat) {
+      p.g   = stat.g;
+      p.a   = stat.a;
+      p.app = stat.app;
+      p.rat = stat.rat;
+    }
+  }
 }
