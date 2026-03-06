@@ -15,7 +15,7 @@
 import { fetchJSON } from './http.js';
 import { logger } from '../index.js';
 
-const BASE = 'https://v3.football.api-sports.io';
+const BASE = 'https://api-football-v1.p.rapidapi.com/v3';
 
 const LEAGUE_IDS = {
   serie_a:          135,
@@ -49,7 +49,10 @@ function apiGet(endpoint, params = {}) {
   if (!apiKey) throw new Error('API_FOOTBALL_KEY not set');
   const qs = new URLSearchParams(params).toString();
   const url = `${BASE}/${endpoint}${qs ? '?' + qs : ''}`;
-  return fetchJSON(url, { headers: { 'x-apisports-key': apiKey } });
+  return fetchJSON(url, { headers: {
+    'x-rapidapi-key': apiKey,
+    'x-rapidapi-host': 'api-football-v1.p.rapidapi.com',
+  } });
 }
 
 function normalizeTeamName(name = '') {
