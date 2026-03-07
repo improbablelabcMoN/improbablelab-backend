@@ -10,27 +10,15 @@ app.use(express.json());
 
 export const logger = createLogger({
   level: 'info',
-  format: format.combine(format.timestamp({ format: 'MMM D YYYY HH:mm:ss' }), format.printf(({ level, message, timestamp }) => `[${level.toUpperCase()}]  ${message}`)),
+  format: format.combine(
+    format.timestamp({ format: 'MMM D YYYY HH:mm:ss' }),
+    format.printf(({ level, message }) => `[${level.toUpperCase()}]  ${message}`)
+  ),
   transports: [new transports.Console()],
 });
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
-
-// Debug temporaneo: testa API-Football direttamente
-  const LEAGUE_IDS = { serie_a:135, premier_league:39, la_liga:140, bundesliga:78, ligue_1:61, champions_league:2 };
-  try {
-    const from = new Date(Date.now() - 7*86400000).toISOString().slice(0,10);
-    const to   = new Date(Date.now() + 30*86400000).toISOString().slice(0,10);
-    const results = {};
-    for (const [name, id] of Object.entries(LEAGUE_IDS)) {
-      const url = `https://v3.football.api-sports.io/fixtures?league=${id}&season=2025&from=${from}&to=${to}`;
-      const d = await fetch(url, { headers: { 'x-apisports-key': key } }).then(r=>r.json());
-      results[name] = { count: d.results, errors: d.errors, sample: d.response?.slice(0,1).map(f=>({ date: f.fixture?.date?.slice(0,10), home: f.teams?.home?.name, away: f.teams?.away?.name, elapsed: f.fixture?.status?.elapsed })) };
-    }
-    res.json({ keyUsed: key.slice(0,6)+'...', results });
-  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 async function startServer() {
