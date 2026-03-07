@@ -20,6 +20,24 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Debug temporaneo: forza refetch CL e mostra risultato
+app.get('/debug/cl', async (req, res) => {
+  try {
+    const { scrapeLineups } = await import('./routes/besoccer.js');
+    const matches = await scrapeLineups('champions_league');
+    const byStatus = matches.reduce((acc, m) => {
+      acc[m.staticStatus] = (acc[m.staticStatus] || 0) + 1;
+      return acc;
+    }, {});
+    const scheduled = matches.filter(m => m.staticStatus === 'scheduled');
+    res.json({
+      total: matches.length,
+      byStatus,
+      scheduledSample: scheduled.slice(0, 5).map(m => ({ home: m.home, away: m.away, date: m.date, round: m.round })),
+    });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 async function startServer() {
   try {
     const { default: lineupsRouter }   = await import('./routes/lineups.js');
