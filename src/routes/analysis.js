@@ -31,11 +31,54 @@ async function generateAnalysis({ home, away, league, date, time }) {
   const apiKey = process.env.PERPLEXITY_API_KEY;
   if (!apiKey) throw new Error('PERPLEXITY_API_KEY not set in environment');
 
-  const systemPrompt = `Sei un analista calcistico esperto. Rispondi SOLO con un oggetto JSON valido, senza testo prima o dopo, senza markdown, senza backtick.`;
+  const today = new Date().toISOString().slice(0, 10);
+  const systemPrompt = `Sei un analista calcistico esperto con accesso a notizie in tempo reale. Rispondi SOLO con un oggetto JSON valido, senza testo prima o dopo, senza markdown, senza backtick.
+REGOLE FONDAMENTALI:
+- Cita SOLO giocatori che sono ATTUALMENTE in rosa nella squadra indicata (stagione corrente ${today.slice(0,4)}/${String(Number(today.slice(0,4))+1).slice(2)})
+- Non citare mai giocatori ceduti, in prestito altrove, o svincolati
+- Se non sei sicuro che un giocatore sia ancora in rosa, NON citarlo
+- Solo fatti concreti, specifici e verificabili con fonte e data recente`;
 
   const userPrompt = `Analizza la partita: ${home} vs ${away} — ${league}, ${date} ore ${time || 'TBD'}.
+Data di oggi: ${today}. Cerca SOLO informazioni degli ultimi 14 giorni.
 
-Cerca le informazioni più aggiornate disponibili e restituisci SOLO questo JSON:
+VERIFICA ROSA: Prima di citare qualsiasi giocatore, verifica che sia ATTUALMENTE tesserato con quella squadra nella stagione in corso. Non citare giocatori ceduti nel mercato estivo o invernale recente.
+
+Per il campo "news", inserisci ONLY notizie concrete e verificate:
+- Infortuni e assenze CONFERMATE con nome giocatore e data prevista rientro
+- Squalifiche (cartellino rosso o diffida raggiunta)  
+- Rientri da infortunio con tempistica
+- Dichiarazioni RECENTI dell'allenatore in conferenza stampa (ultimi 3 giorni)
+- Notizie da mercato che impattano la rosa ATTUALE
+
+Per il campo "press_conference", cerca le ultime dichiarazioni pre-partita dell'allenatore:
+- Chi ha dichiarato indisponibile o dubbio
+- Indicazioni tattiche date pubblicamente
+- Stato di forma di giocatori chiave menzionato dall'allenatore
+- Data e fonte della conferenza
+
+NON inserire nelle news: frasi generiche, "partita importante", orari, informazioni ovvie.
+Ogni news deve citare un fatto specifico con nome giocatore, data e fonte.
+
+Per il campo "social_updates", cerca le notizie e aggiornamenti più recenti degli ultimi 7 giorni
+su entrambe le squadre, da qualsiasi fonte giornalistica o social attendibile.
+Includi notizie da: Sky Sport, Gazzetta dello Sport, Corriere dello Sport, BBC Sport, The Athletic,
+L'Equipe, Marca, AS, Fabrizio Romano, account ufficiali club, conferenze stampa allenatori.
+Cerca specificamente: chi è infortunato, chi è squalificato, chi rientra, dichiarazioni allenatore
+sulla formazione, stato di forma della squadra, notizie tattiche importanti.
+Produci SEMPRE almeno 3-5 aggiornamenti per partita se esistono notizie rilevanti.
+Se le notizie sono le stesse del campo "news", includile comunque in social_updates con la fonte.
+
+Per ogni aggiornamento social indica:
+- source_name: nome account o testata
+- source_type: "official" | "journalist" | "insider"
+- reliability: "high" | "medium"
+- text: testo/contenuto della notizia in italiano
+- player: nome giocatore citato o null
+- signal: "injury" | "starter" | "doubt" | "return" | "tactics" | "other"
+- raw_text: frase chiave originale (es: "Leao out, gioca Okafor")
+
+Restituisci SOLO questo JSON (struttura identica):
 
 {
   "stadium": {
@@ -46,7 +89,20 @@ Cerca le informazioni più aggiornate disponibili e restituisci SOLO questo JSON
     "note": "breve nota atmosfera/tifoseria"
   },
   "news": [
-    { "type": "injury|suspension|form|transfer|other", "team": "nome squadra", "player": "nome giocatore o null", "text": "notizia aggiornata su infortuni, squalifiche o forma recente", "impact": "high|medium|low" }
+    { "type": "injury|suspension|form|transfer|other", "team": "nome squadra", "player": "nome giocatore o null", "text": "fatto specifico con dettaglio concreto, es: out per lesione muscolare dal 28/02", "impact": "high|medium|low" }
+  ],
+  "social_updates": [
+    {
+      "team": "nome squadra",
+      "source_name": "Fabrizio Romano",
+      "source_type": "journalist",
+      "reliability": "high",
+      "text": "testo notizia in italiano",
+      "player": "nome giocatore o null",
+      "signal": "injury|starter|doubt|return|tactics|other",
+      "raw_text": "frase chiave originale",
+      "published_at": "YYYY-MM-DDTHH:mm:ssZ o null"
+    }
   ],
   "lineup_reasoning": {
     "home": "2-3 frasi sul probabile modulo e scelte tattiche della squadra di casa basate su dati recenti",
@@ -60,13 +116,34 @@ Cerca le informazioni più aggiornate disponibili e restituisci SOLO questo JSON
     "reasoning": "1-2 frasi che spiegano il pronostico basato su forma recente e statistiche",
     "key_factor": "il fattore decisivo della partita in una frase"
   },
+  "press_conference": {
+    "home": {
+      "coach": "nome allenatore",
+      "date": "YYYY-MM-DD o null",
+      "absences": ["giocatore1", "giocatore2"],
+      "doubts": ["giocatore dubbio"],
+      "quote": "dichiarazione chiave in italiano o null",
+      "source": "fonte es. Sky Sport IT"
+    },
+    "away": {
+      "coach": "nome allenatore",
+      "date": "YYYY-MM-DD o null",
+      "absences": [],
+      "doubts": [],
+      "quote": null,
+      "source": null
+    }
+  },
   "last_meetings": [
     { "date": "YYYY-MM-DD", "result": "2-1", "winner": "home|away|draw" }
   ],
   "generated_at": "${new Date().toISOString()}"
 }
 
-Usa dati reali e aggiornati. Le percentuali forecast devono sommare esattamente a 100.`;
+Ordina le news per impatto: prima injury e suspension (high), poi form e transfer (medium/low).
+Ordina social_updates per reliability (high prima) poi per data (più recente prima).
+Le percentuali forecast devono sommare esattamente a 100.
+Restituisci SEMPRE almeno 3 elementi in social_updates se esistono notizie sulla partita. Solo se non trovi assolutamente nulla, restituisci array vuoto.`;
 
   const response = await fetch(PERPLEXITY_API, {
     method: 'POST',
@@ -80,7 +157,7 @@ Usa dati reali e aggiornati. Le percentuali forecast devono sommare esattamente 
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
-      max_tokens: 1500,
+      max_tokens: 3000,
       temperature: 0.2,
       search_recency_filter: 'week',
       return_citations: false,
@@ -104,7 +181,7 @@ Usa dati reali e aggiornati. Le percentuali forecast devono sommare esattamente 
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt },
           ],
-          max_tokens: 1500,
+          max_tokens: 3000,
           temperature: 0.2,
           search_recency_filter: 'week',
           return_citations: false,
@@ -168,7 +245,10 @@ router.get('/', (req, res) => {
 
   const status = jobStatus.get(cacheKey);
   if (status?.startsWith('error:')) {
-    return res.status(500).json({ ok: false, status: 'error', error: status.slice(6) });
+    const errMsg = status.slice(6);
+    logger.warn(`[analysis] returning error to client: ${errMsg}`);
+    // Ritorna 200 con flag error invece di 500, il frontend gestisce gracefully
+    return res.json({ ok: false, status: 'error', error: errMsg });
   }
 
   startJob(cacheKey, { home, away, league, date, time });
