@@ -215,7 +215,9 @@ export async function scrapeLineups(league = 'premier_league') {
     CL_KNOCKOUT_SLUGS.map(slug => {
       const url = `${BASE}${slug}`;
       logger.info(`[BeSoccer] Fetching CL knockout: ${url}`);
-      return fetchHTML(url).catch(() => null);
+      return fetchHTML(url)
+        .then(html => { logger.info(`[BeSoccer] CL knockout OK: ${slug} (${html?.length || 0} chars)`); return html; })
+        .catch(err => { logger.warn(`[BeSoccer] CL knockout failed: ${slug} — ${err.message}`); return null; });
     })
   );
 
