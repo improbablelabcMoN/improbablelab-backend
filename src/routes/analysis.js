@@ -27,64 +27,13 @@ function cacheSet(key, data) {
   doneCache.set(key, { data, expiresAt: Date.now() + CACHE_TTL_MS });
 }
 
-// ── Mappa account X per lega/squadra ────────────────────────────────────────
-// Usata per guidare Perplexity verso fonti X di qualità specifiche per squadra
-const SOCIAL_SOURCES = {
-  premier_league: {
-    _generic: ['@FFScoutCity', '@OptaJoe'],
-    'Arsenal': ['@afcstuff'],
-    'Manchester City': ['@City_Xtra'],
-    'Liverpool': ['@thisisanfield'],
-    'Chelsea': ['@AbsoluteChelsea'],
-    'Manchester United': ['@UtdDistrict'],
-    'Tottenham': ['@thespursweb'],
-    'Aston Villa': ['@villareport'],
-    'Newcastle': ['@NUFC360'],
-    'West Ham': ['@ExWHUEmployee'],
-    'Everton': ['@toffeetvefc'],
-    'Brighton': ['@BHAFCxtra'],
-    'Nottingham Forest': ['@ForestReport'],
-    'Fulham': ['@FulhamFC_News'],
-    'Wolves': ['@WolvesXtra'],
-    'Crystal Palace': ['@PalaceXtra'],
-    'Brentford': ['@BrentfordTweet'],
-    'Bournemouth': ['@AFCBxtra'],
-    'Ipswich': ['@IpswichExtra'],
-    'Leeds': ['@LUFC_News'],
-    'Sunderland': ['@SunderlandEcho'],
-    'Burnley': ['@BurnleyFCNews'],
-    'Leicester': ['@FoxesExtra'],
-  },
-};
-
-function getSocialSources(league, home, away) {
-  const map = SOCIAL_SOURCES[league];
-  if (!map) return null;
-  const accounts = [...(map._generic || [])];
-  // cerca match parziale (es. "Man City" → "Manchester City")
-  for (const [team, accs] of Object.entries(map)) {
-    if (team === '_generic') continue;
-    const t = team.toLowerCase();
-    const h = home.toLowerCase();
-    const a = away.toLowerCase();
-    if (h.includes(t) || t.includes(h) || h.includes(t.split(' ')[0])) accounts.push(...accs);
-    if (a.includes(t) || t.includes(a) || a.includes(t.split(' ')[0])) accounts.push(...accs);
-  }
-  return [...new Set(accounts)]; // dedup
-}
-
 async function generateAnalysis({ home, away, league, date, time }) {
   const apiKey = process.env.PERPLEXITY_API_KEY;
   if (!apiKey) throw new Error('PERPLEXITY_API_KEY not set in environment');
 
-  const socialSources = getSocialSources(league, home, away);
-  const socialInstruction = socialSources?.length
-    ? `\nPer la sezione social_updates, cerca notizie recenti (ultimi 7 giorni) su X/Twitter privilegiando questi account: ${socialSources.join(', ')}. Estrai aggiornamenti su infortuni, conferenze stampa, indisponibili, lineup leaks.`
-    : '';
-
   const systemPrompt = `Sei un analista calcistico esperto. Rispondi SOLO con un oggetto JSON valido, senza testo prima o dopo, senza markdown, senza backtick.`;
 
-  const userPrompt = `Analizza la partita: ${home} vs ${away} — ${league}, ${date} ore ${time || 'TBD'}.${socialInstruction}
+  const userPrompt = `Analizza la partita: ${home} vs ${away} — ${league}, ${date} ore ${time || 'TBD'}.
 
 Cerca le informazioni più aggiornate disponibili e restituisci SOLO questo JSON:
 
@@ -114,13 +63,10 @@ Cerca le informazioni più aggiornate disponibili e restituisci SOLO questo JSON
   "last_meetings": [
     { "date": "YYYY-MM-DD", "result": "2-1", "winner": "home|away|draw" }
   ],
-  "social_updates": [
-    { "account": "@handle", "text": "testo aggiornamento", "team": "nome squadra o null", "published_at": "YYYY-MM-DDTHH:MM:SSZ" }
-  ],
   "generated_at": "${new Date().toISOString()}"
 }
 
-Usa dati reali e aggiornati. Le percentuali forecast devono sommare esattamente a 100. Per social_updates includi 3-6 aggiornamenti recenti (ultimi 7 giorni) rilevanti per questa partita: infortuni, dichiarazioni, indisponibili, lineup leaks. Se non trovi tweet specifici, usa notizie da qualsiasi fonte affidabile per quel club.`;
+Usa dati reali e aggiornati. Le percentuali forecast devono sommare esattamente a 100.`;
 
   const response = await fetch(PERPLEXITY_API, {
     method: 'POST',
@@ -134,7 +80,7 @@ Usa dati reali e aggiornati. Le percentuali forecast devono sommare esattamente 
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
-      max_tokens: 2000,
+      max_tokens: 1500,
       temperature: 0.2,
       search_recency_filter: 'week',
       return_citations: false,
@@ -158,7 +104,7 @@ Usa dati reali e aggiornati. Le percentuali forecast devono sommare esattamente 
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt },
           ],
-          max_tokens: 2000,
+          max_tokens: 1500,
           temperature: 0.2,
           search_recency_filter: 'week',
           return_citations: false,
