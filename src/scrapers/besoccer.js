@@ -181,10 +181,12 @@ export async function scrapeLineups(league = 'premier_league') {
 
   logger.info(`[BeSoccer] ${league}: ${allOptions.length} rounds, current="${selectedVal}" (idx=${selectedIdx})`);
 
-  // Prendi l'opzione corrente + le 2 precedenti
+  // Prendi l'opzione corrente + 2 precedenti + 2 successive (per partite future)
   const toFetch = [selectedVal];
   if (selectedIdx > 0) toFetch.push(allOptions[selectedIdx - 1]);
   if (selectedIdx > 1) toFetch.push(allOptions[selectedIdx - 2]);
+  if (selectedIdx < allOptions.length - 1) toFetch.push(allOptions[selectedIdx + 1]);
+  if (selectedIdx < allOptions.length - 2) toFetch.push(allOptions[selectedIdx + 2]);
 
   // Fetch in parallelo (skip la prima che abbiamo già)
   const extraHtmls = await Promise.all(
@@ -198,15 +200,26 @@ export async function scrapeLineups(league = 'premier_league') {
     })
   );
 
-  // Parsa tutte le pagine
+  // Estrai numero giornata dall'URL selezionato (es: matchday-31 → 31)
+  const roundMatch = selectedVal.match(/matchday-(\d+)/i) || selectedVal.match(/round-(\d+)/i);
+  const currentRound = roundMatch ? parseInt(roundMatch[1]) : null;
+
+  // Parsa tutte le pagine, tracciando da quale round proviene ogni match
   const seen = new Set();
   const allMatches = [];
 
-  for (const html of [html1, ...extraHtmls]) {
+  const allPages = [{ html: html1, optVal: selectedVal }, ...toFetch.slice(1).map((optVal, i) => ({ html: extraHtmls[i], optVal }))];
+
+  for (const { html, optVal } of allPages) {
     if (!html) continue;
+    const rm = optVal?.match(/matchday-(\d+)/i) || optVal?.match(/round-(\d+)/i);
+    const pageRound = rm ? parseInt(rm[1]) : currentRound;
     for (const m of parseMatchesFromHTML(html, league)) {
       const key = `${m.home}|${m.away}`;
-      if (!seen.has(key)) { seen.add(key); allMatches.push(m); }
+      if (!seen.has(key)) {
+        seen.add(key);
+        allMatches.push({ ...m, round: pageRound, gw: pageRound });
+      }
     }
   }
 
