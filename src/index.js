@@ -1,20 +1,18 @@
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
+import { createLogger, format, transports } from 'winston';
 
-dotenv.config();
+const PORT = process.env.PORT || 8080;
+const app  = express();
 
-export const logger = {
-  info:  (msg) => console.log(`[INFO]  ${msg}`),
-  warn:  (msg) => console.warn(`[WARN]  ${msg}`),
-  error: (msg) => console.error(`[ERROR] ${msg}`),
-};
-
-const app = express();
-const PORT = process.env.PORT || 3001;
-
-app.use(cors({ origin: '*' }));
+app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
 app.use(express.json());
+
+export const logger = createLogger({
+  level: 'info',
+  format: format.combine(format.timestamp({ format: 'MMM D YYYY HH:mm:ss' }), format.printf(({ level, message, timestamp }) => `[${level.toUpperCase()}]  ${message}`)),
+  transports: [new transports.Console()],
+});
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -27,10 +25,19 @@ app.get('/debug/apifootball', async (req, res) => {
   try {
     const today = new Date().toISOString().slice(0, 10);
     const to    = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
-    const url   = `https://v3.football.api-sports.io/fixtures?league=39&season=2024&from=${today}&to=${to}`;
-    const r = await fetch(url, { headers: { 'x-apisports-key': key } });
-    const d = await r.json();
-    res.json({ status: r.status, results: d.results, errors: d.errors, keyUsed: key.slice(0,6)+'...', sample: d.response?.slice(0,2).map(f=>({ date: f.fixture?.date, home: f.teams?.home?.name, away: f.teams?.away?.name })) });
+    // Test senza season per vedere se restituisce dati
+    const url1 = `https://v3.football.api-sports.io/fixtures?league=39&from=${today}&to=${to}`;
+    // Test con season
+    const url2 = `https://v3.football.api-sports.io/fixtures?league=39&season=2024&from=${today}&to=${to}`;
+    const [r1, r2] = await Promise.all([
+      fetch(url1, { headers: { 'x-apisports-key': key } }).then(r=>r.json()),
+      fetch(url2, { headers: { 'x-apisports-key': key } }).then(r=>r.json()),
+    ]);
+    res.json({
+      withoutSeason: { results: r1.results, errors: r1.errors, sample: r1.response?.slice(0,1).map(f=>({ date: f.fixture?.date, home: f.teams?.home?.name, away: f.teams?.away?.name })) },
+      withSeason2024: { results: r2.results, errors: r2.errors },
+      keyUsed: key.slice(0,6)+'...',
+    });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -42,6 +49,7 @@ async function startServer() {
     const { default: newsRouter }      = await import('./routes/news.js');
     const { default: analysisRouter }  = await import('./routes/analysis.js');
     const { default: socialRouter }    = await import('./routes/social.js');
+    const { default: fixturesRouter }  = await import('./routes/fixtures.js');
 
     app.use('/api/lineups',   lineupsRouter);
     app.use('/api/standings', standingsRouter);
@@ -49,6 +57,7 @@ async function startServer() {
     app.use('/api/news',      newsRouter);
     app.use('/api/analysis',  analysisRouter);
     app.use('/api/social',    socialRouter);
+    app.use('/api/fixtures',  fixturesRouter);
 
     logger.info('Routes loaded OK');
   } catch (err) {
