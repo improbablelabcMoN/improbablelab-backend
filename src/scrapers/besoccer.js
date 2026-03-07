@@ -181,6 +181,16 @@ export async function scrapeLineups(league = 'premier_league') {
 
   logger.info(`[BeSoccer] ${league}: ${allOptions.length} rounds, current="${selectedVal}" (idx=${selectedIdx})`);
 
+  // Per champions_league: aggiungi sempre gli slug dei round a eliminazione diretta
+  // (non appaiono nel select standard di BeSoccer)
+  const CL_KNOCKOUT_SLUGS = league === 'champions_league' ? [
+    '/en/competition/champions_league/round-of-16',
+    '/en/competition/champions_league/quarter-finals',
+    '/en/competition/champions_league/semi-finals',
+    '/en/competition/champions_league/final',
+    '/en/competition/champions_league/knockout-round-play-offs',
+  ] : [];
+
   // Prendi l'opzione corrente + 2 precedenti + 2 successive (per partite future)
   const toFetch = [selectedVal];
   if (selectedIdx > 0) toFetch.push(allOptions[selectedIdx - 1]);
@@ -200,6 +210,15 @@ export async function scrapeLineups(league = 'premier_league') {
     })
   );
 
+  // Fetch slug knockout CL separati
+  const knockoutHtmls = await Promise.all(
+    CL_KNOCKOUT_SLUGS.map(slug => {
+      const url = `${BASE}${slug}`;
+      logger.info(`[BeSoccer] Fetching CL knockout: ${url}`);
+      return fetchHTML(url).catch(() => null);
+    })
+  );
+
   // Estrai numero giornata dall'URL selezionato (es: matchday-31 → 31)
   const roundMatch = selectedVal.match(/matchday-(\d+)/i) || selectedVal.match(/round-(\d+)/i);
   const currentRound = roundMatch ? parseInt(roundMatch[1]) : null;
@@ -208,7 +227,7 @@ export async function scrapeLineups(league = 'premier_league') {
   const seen = new Set();
   const allMatches = [];
 
-  const allPages = [{ html: html1, optVal: selectedVal }, ...toFetch.slice(1).map((optVal, i) => ({ html: extraHtmls[i], optVal }))];
+  const allPages = [{ html: html1, optVal: selectedVal }, ...toFetch.slice(1).map((optVal, i) => ({ html: extraHtmls[i], optVal })), ...knockoutHtmls.map((html, i) => ({ html, optVal: CL_KNOCKOUT_SLUGS[i] }))];
 
   for (const { html, optVal } of allPages) {
     if (!html) continue;
