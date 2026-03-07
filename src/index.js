@@ -28,14 +28,17 @@ app.get('/debug/apifootball', async (req, res) => {
     // Test senza season per vedere se restituisce dati
     const url1 = `https://v3.football.api-sports.io/fixtures?league=39&from=${today}&to=${to}`;
     // Test con season
-    const url2 = `https://v3.football.api-sports.io/fixtures?league=39&season=2024&from=${today}&to=${to}`;
-    const [r1, r2] = await Promise.all([
+    const url2 = `https://v3.football.api-sports.io/fixtures?league=39&season=2025&next=5`;
+    const url3 = `https://v3.football.api-sports.io/fixtures?league=39&season=2025&next=5`;
+    const [r1, r2, r3] = await Promise.all([
       fetch(url1, { headers: { 'x-apisports-key': key } }).then(r=>r.json()),
       fetch(url2, { headers: { 'x-apisports-key': key } }).then(r=>r.json()),
+      fetch(url3, { headers: { 'x-apisports-key': key } }).then(r=>r.json()),
     ]);
     res.json({
       withoutSeason: { results: r1.results, errors: r1.errors, sample: r1.response?.slice(0,1).map(f=>({ date: f.fixture?.date, home: f.teams?.home?.name, away: f.teams?.away?.name })) },
       withSeason2024: { results: r2.results, errors: r2.errors },
+      withSeason2025: { results: r3.results, errors: r3.errors, sample: r3.response?.slice(0,1).map(f=>({ date: f.fixture?.date, home: f.teams?.home?.name, away: f.teams?.away?.name })) },
       keyUsed: key.slice(0,6)+'...',
     });
   } catch(e) { res.status(500).json({ error: e.message }); }
