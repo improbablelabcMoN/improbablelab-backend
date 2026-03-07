@@ -181,6 +181,8 @@ function initMatch(item, league) {
     away:    item.awayTeam,
     date:    item.date    || '',
     time:    item.time    || '',
+    round:   item.round   || item.gw || null,
+    gw:      item.gw      || item.round || null,
     staticStatus: 'scheduled',
     score:   { home: 0, away: 0 },
     conf:    0,
