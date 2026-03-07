@@ -27,14 +27,14 @@ const LEAGUE_IDS = {
 };
 
 const SEASON_BY_LEAGUE = {
-  serie_a: 2024, premier_league: 2024, la_liga: 2024,
-  bundesliga: 2024, ligue_1: 2024, champions_league: 2024, europa_league: 2024,
+  serie_a: 2025, premier_league: 2025, la_liga: 2025,
+  bundesliga: 2025, ligue_1: 2025, champions_league: 2025, europa_league: 2025,
 };
 function getSeason(leagueId) {
   // Mappa leagueId → slug per trovare la stagione
   const idToSlug = { 135:'serie_a', 39:'premier_league', 140:'la_liga', 78:'bundesliga', 61:'ligue_1', 2:'champions_league', 3:'europa_league' };
   const slug = idToSlug[leagueId];
-  return SEASON_BY_LEAGUE[slug] || 2024;
+  return SEASON_BY_LEAGUE[slug] || 2025;
 }
 
 // Cache
