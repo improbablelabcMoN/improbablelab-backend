@@ -64,7 +64,7 @@ function normalizeTeamName(name = '') {
 }
 
 // Carica tutte le fixture della settimana per una lega → mappa normalizzata
-async function loadFixtureMap(league) {
+export async function loadFixtureMap(league) {
   const leagueId = LEAGUE_IDS[league];
   if (!leagueId) return new Map();
 
