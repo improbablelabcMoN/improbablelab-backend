@@ -22,25 +22,17 @@ app.get('/health', (req, res) => {
 app.get('/debug/apifootball', async (req, res) => {
   const key = process.env.API_FOOTBALL_KEY;
   if (!key) return res.status(500).json({ error: 'API_FOOTBALL_KEY not set' });
+  const LEAGUE_IDS = { serie_a:135, premier_league:39, la_liga:140, bundesliga:78, ligue_1:61, champions_league:2 };
   try {
-    const today = new Date().toISOString().slice(0, 10);
-    const to    = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
-    // Test senza season per vedere se restituisce dati
-    const url1 = `https://v3.football.api-sports.io/fixtures?league=39&from=${today}&to=${to}`;
-    // Test con season
-    const url2 = `https://v3.football.api-sports.io/fixtures?league=39&season=2025&next=5`;
-    const url3 = `https://v3.football.api-sports.io/fixtures?league=39&season=2025&next=5`;
-    const [r1, r2, r3] = await Promise.all([
-      fetch(url1, { headers: { 'x-apisports-key': key } }).then(r=>r.json()),
-      fetch(url2, { headers: { 'x-apisports-key': key } }).then(r=>r.json()),
-      fetch(url3, { headers: { 'x-apisports-key': key } }).then(r=>r.json()),
-    ]);
-    res.json({
-      withoutSeason: { results: r1.results, errors: r1.errors, sample: r1.response?.slice(0,1).map(f=>({ date: f.fixture?.date, home: f.teams?.home?.name, away: f.teams?.away?.name })) },
-      withSeason2024: { results: r2.results, errors: r2.errors },
-      withSeason2025: { results: r3.results, errors: r3.errors, sample: r3.response?.slice(0,1).map(f=>({ date: f.fixture?.date, home: f.teams?.home?.name, away: f.teams?.away?.name })) },
-      keyUsed: key.slice(0,6)+'...',
-    });
+    const from = new Date(Date.now() - 7*86400000).toISOString().slice(0,10);
+    const to   = new Date(Date.now() + 30*86400000).toISOString().slice(0,10);
+    const results = {};
+    for (const [name, id] of Object.entries(LEAGUE_IDS)) {
+      const url = `https://v3.football.api-sports.io/fixtures?league=${id}&season=2025&from=${from}&to=${to}`;
+      const d = await fetch(url, { headers: { 'x-apisports-key': key } }).then(r=>r.json());
+      results[name] = { count: d.results, errors: d.errors, sample: d.response?.slice(0,1).map(f=>({ date: f.fixture?.date?.slice(0,10), home: f.teams?.home?.name, away: f.teams?.away?.name, elapsed: f.fixture?.status?.elapsed })) };
+    }
+    res.json({ keyUsed: key.slice(0,6)+'...', results });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
