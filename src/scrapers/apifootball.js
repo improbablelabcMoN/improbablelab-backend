@@ -54,8 +54,62 @@ function apiGet(endpoint, params = {}) {
   } });
 }
 
+const TEAM_ALIASES = {
+  'bournemouth': 'bournemout', 'afc bournemouth': 'bournemout',
+  'borussia dortmund': 'dortmund', 'b. dortmund': 'dortmund',
+  'borussia monchengladbach': 'gladbach', 'b. monchengladbach': 'gladbach', 'b. mönchengladbach': 'gladbach',
+  'bayer leverkusen': 'leverkusen', 'b. leverkusen': 'leverkusen',
+  'rb leipzig': 'leipzig',
+  'atletico madrid': 'atletico', 'atletico de madrid': 'atletico', 'atlético de madrid': 'atletico',
+  'real betis': 'betis',
+  'villarreal cf': 'villarreal',
+  'athletic bilbao': 'athletic', 'athletic club': 'athletic',
+  'inter milan': 'inter', 'fc internazionale': 'inter',
+  'ac milan': 'milan',
+  'as roma': 'roma',
+  'ss lazio': 'lazio',
+  'hellas verona': 'hellasverona',
+  'brighton': 'brightonho', 'brighton & hove albion': 'brightonho', 'brighton and hove albion': 'brightonho',
+  'nottingham forest': 'nforest', 'nottm forest': 'nforest',
+  'manchester united': 'manutd', 'man united': 'manutd', 'man utd': 'manutd',
+  'manchester city': 'mancity', 'man city': 'mancity',
+  'tottenham hotspur': 'tottenham', 'spurs': 'tottenham',
+  'newcastle united': 'newcastle',
+  'wolverhampton': 'wolverhampton', 'wolves': 'wolverhampton',
+  'west ham united': 'westham',
+  'aston villa': 'astonvilla',
+  'crystal palace': 'crystalpalace',
+  'paris saint-germain': 'psg', 'paris sg': 'psg',
+  'olympique marseille': 'marseille',
+  'olympique lyonnais': 'lyon',
+  'stade brestois': 'brest', 'stade brestois 29': 'brest',
+  'stade rennais': 'rennes',
+  'eintracht frankfurt': 'eintracht',
+  'fc st. pauli': 'stpauli', 'fc st pauli': 'stpauli',
+  'union berlin': 'unionberlin', '1. fc union berlin': 'unionberlin',
+  'sc freiburg': 'freiburg',
+  'hamburger sv': 'hamburg', 'hsv': 'hamburg',
+  'werder bremen': 'werder', 'sv werder bremen': 'werder',
+  '1. fc koln': 'koln', '1. fc köln': 'koln', 'fc koln': 'koln',
+  'fc augsburg': 'augsburg',
+  'vfb stuttgart': 'stuttgart',
+  'tsg hoffenheim': 'hoffenheim', '1899 hoffenheim': 'hoffenheim',
+  'fc heidenheim': 'heidenheim', '1. fc heidenheim': 'heidenheim',
+  'vfl wolfsburg': 'wolfsburg',
+  'deportivo alaves': 'alaves', 'deportivo alavés': 'alaves',
+  'rayo vallecano': 'rayo',
+  'real sociedad': 'realsociedad',
+  'galatasaray': 'galatasaray', 'galatasaray sk': 'galatasaray',
+  'club brugge': 'clubbrugge',
+  'sporting cp': 'sporting', 'sporting clube de portugal': 'sporting',
+  'fc barcelona': 'barcelona',
+  'real madrid': 'realmadrid', 'real madrid cf': 'realmadrid',
+};
+
 function normalizeTeamName(name = '') {
-  return name.toLowerCase()
+  const lower = name.toLowerCase().trim();
+  if (TEAM_ALIASES[lower]) return TEAM_ALIASES[lower];
+  return lower
     .replace(/\s+(fc|cf|ac|sc|ssc|afc|asd|utd|united|city|calcio)$/i, '')
     .replace(/^(fc|cf|ac|sc|ssc|afc)\s+/i, '')
     .replace(/[^a-z0-9]/g, '')
@@ -98,6 +152,15 @@ export async function loadFixtureMap(league) {
         homeName:   f.teams?.home?.name,
         awayName:   f.teams?.away?.name,
         status:     f.fixture?.status?.short,
+        elapsed:    f.fixture?.status?.elapsed ?? null,
+        score:      { home: f.goals?.home ?? null, away: f.goals?.away ?? null },
+        events:     (f.events || []).filter(e => e.type === 'Goal' || e.type === 'subst').map(e => ({
+          time: e.time?.elapsed,
+          type: e.type,
+          team: e.team?.name,
+          player: e.player?.name,
+          assist: e.assist?.name,
+        })),
       });
     }
 
