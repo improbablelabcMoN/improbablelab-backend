@@ -77,7 +77,8 @@ export async function loadFixtureMap(league) {
     const data = await apiGet('fixtures', {
       league: leagueId,
       season: season,
-      next:   50,
+      from: new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10),
+      to:   new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
     });
     logger.info(`[API-Football] fixtures response: ${data?.results} results, errors=${JSON.stringify(data?.errors)}`);
 
