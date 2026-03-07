@@ -20,23 +20,18 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Debug temporaneo: forza refetch CL e mostra risultato
-app.get('/debug/cl', async (req, res) => {
+// Debug temporaneo: testa API-Football direttamente
+app.get('/debug/apifootball', async (req, res) => {
+  const key = process.env.API_FOOTBALL_KEY;
+  if (!key) return res.status(500).json({ error: 'API_FOOTBALL_KEY not set' });
   try {
-    const mod = await import('./routes/besoccer.js');
-    const matches = await mod.scrapeLineups('champions_league');
-    const byStatus = matches.reduce((acc, m) => {
-      acc[m.staticStatus] = (acc[m.staticStatus] || 0) + 1;
-      return acc;
-    }, {});
-    const scheduled = matches.filter(m => m.staticStatus === 'scheduled');
-    res.json({
-      total: matches.length,
-      byStatus,
-      scheduledSample: scheduled.slice(0, 5).map(m => ({ home: m.home, away: m.away, date: m.date, round: m.round })),
-      allSample: matches.slice(0, 3).map(m => ({ home: m.home, away: m.away, date: m.date, staticStatus: m.staticStatus })),
-    });
-  } catch(e) { res.status(500).json({ error: e.message, stack: e.stack?.slice(0,300) }); }
+    const today = new Date().toISOString().slice(0, 10);
+    const to    = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+    const url   = `https://v3.football.api-sports.io/fixtures?league=39&season=2024&from=${today}&to=${to}`;
+    const r = await fetch(url, { headers: { 'x-apisports-key': key } });
+    const d = await r.json();
+    res.json({ status: r.status, results: d.results, errors: d.errors, keyUsed: key.slice(0,6)+'...', sample: d.response?.slice(0,2).map(f=>({ date: f.fixture?.date, home: f.teams?.home?.name, away: f.teams?.away?.name })) });
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 async function startServer() {
