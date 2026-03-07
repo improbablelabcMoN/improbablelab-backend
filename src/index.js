@@ -19,9 +19,6 @@ app.get('/health', (req, res) => {
 });
 
 // Debug temporaneo: testa API-Football direttamente
-app.get('/debug/apifootball', async (req, res) => {
-  const key = process.env.API_FOOTBALL_KEY;
-  if (!key) return res.status(500).json({ error: 'API_FOOTBALL_KEY not set' });
   const LEAGUE_IDS = { serie_a:135, premier_league:39, la_liga:140, bundesliga:78, ligue_1:61, champions_league:2 };
   try {
     const from = new Date(Date.now() - 7*86400000).toISOString().slice(0,10);
