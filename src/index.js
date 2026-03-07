@@ -23,8 +23,8 @@ app.get('/health', (req, res) => {
 // Debug temporaneo: forza refetch CL e mostra risultato
 app.get('/debug/cl', async (req, res) => {
   try {
-    const { scrapeLineups } = await import('./routes/besoccer.js');
-    const matches = await scrapeLineups('champions_league');
+    const mod = await import('./routes/besoccer.js');
+    const matches = await mod.scrapeLineups('champions_league');
     const byStatus = matches.reduce((acc, m) => {
       acc[m.staticStatus] = (acc[m.staticStatus] || 0) + 1;
       return acc;
@@ -34,8 +34,9 @@ app.get('/debug/cl', async (req, res) => {
       total: matches.length,
       byStatus,
       scheduledSample: scheduled.slice(0, 5).map(m => ({ home: m.home, away: m.away, date: m.date, round: m.round })),
+      allSample: matches.slice(0, 3).map(m => ({ home: m.home, away: m.away, date: m.date, staticStatus: m.staticStatus })),
     });
-  } catch(e) { res.status(500).json({ error: e.message }); }
+  } catch(e) { res.status(500).json({ error: e.message, stack: e.stack?.slice(0,300) }); }
 });
 
 async function startServer() {
