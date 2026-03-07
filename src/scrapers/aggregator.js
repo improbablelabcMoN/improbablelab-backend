@@ -6,7 +6,7 @@ import { scrapeLineups as sosfanta }    from './sosfanta.js';
 import { scrapeLineups as fantacalcio } from './fantacalcio.js';
 import { scrapeLineups as fplitalia }   from './fplitalia.js';
 import { scrapeLineups as besoccer }    from './besoccer.js';
-import { findFixture, getPlayerStats }  from './apifootball.js';
+import { loadFixtureMap, getPlayerStats }  from './apifootball.js';
 // import { scrapeLineups as fantagazzetta } from './fantagazzetta.js'; // dominio irraggiungibile
 
 const SCRAPERS = {
@@ -92,26 +92,39 @@ export async function aggregateLeague(league) {
   }
 
   // ── Arricchisci statistiche giocatori da API-Football (g, a, app, rat) ──
-  // Una chiamata per squadra, TTL 24h — usa i teamId dal fixtureMap
+  // Carica la fixture map UNA SOLA VOLTA per league (non per ogni match!)
   const LEAGUE_IDS_STATS = {
     serie_a: 135, premier_league: 39, la_liga: 140,
     bundesliga: 78, ligue_1: 61, champions_league: 2, europa_league: 3,
   };
   const leagueId = LEAGUE_IDS_STATS[league];
   if (leagueId && process.env.API_FOOTBALL_KEY) {
-    const statsJobs = matches.map(async m => {
-      try {
-        const fx = await findFixture(league, m.home, m.away);
-        if (!fx) return;
-        const [homeStats, awayStats] = await Promise.all([
-          getPlayerStats(fx.homeTeamId, leagueId),
-          getPlayerStats(fx.awayTeamId, leagueId),
-        ]);
-        applyPlayerStats(m.homeData?.players, homeStats);
-        applyPlayerStats(m.awayData?.players, awayStats);
-      } catch (e) { /* silenzioso — stat opzionali */ }
-    });
-    await Promise.allSettled(statsJobs);
+    try {
+      // Una sola chiamata API per tutta la league — poi cerca in locale
+      const fixtureMap = await loadFixtureMap(league);
+      const statsJobs = matches.map(async m => {
+        try {
+          const normHome = m.home?.toLowerCase().replace(/[^a-z]/g, '').slice(0, 8);
+          const normAway = m.away?.toLowerCase().replace(/[^a-z]/g, '').slice(0, 8);
+          const fx = fixtureMap ? [...fixtureMap.values()].find(f => {
+            const fh = f.homeTeam?.toLowerCase().replace(/[^a-z]/g, '').slice(0, 8);
+            const fa = f.awayTeam?.toLowerCase().replace(/[^a-z]/g, '').slice(0, 8);
+            return (fh?.includes(normHome) || normHome?.includes(fh)) &&
+                   (fa?.includes(normAway) || normAway?.includes(fa));
+          }) : null;
+          if (!fx) return;
+          const [homeStats, awayStats] = await Promise.all([
+            getPlayerStats(fx.homeTeamId, leagueId),
+            getPlayerStats(fx.awayTeamId, leagueId),
+          ]);
+          applyPlayerStats(m.homeData?.players, homeStats);
+          applyPlayerStats(m.awayData?.players, awayStats);
+        } catch (e) { /* silenzioso — stat opzionali */ }
+      });
+      await Promise.allSettled(statsJobs);
+    } catch (e) {
+      logger.warn(`[API-Football] fixture map load failed for ${league}: ${e.message}`);
+    }
   }
 
   // Registra automaticamente partite finite nel database storico
